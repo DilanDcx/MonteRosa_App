@@ -1,0 +1,35 @@
+# ==========================
+# 🐍 PYTHON / DJANGO
+# ==========================
+# Ignorar el entorno virtual (ES MUY IMPORTANTE NO SUBIR ESTO)
+venv/
+env/
+.env
+
+# Ignorar archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Ignorar base de datos local (Opcional: Si quieres guardar tus datos de prueba, borra esta línea)
+db.sqlite3
+*.sqlite3
+
+# ==========================
+# 💙 FLUTTER (Carpeta app_im)
+# ==========================
+# Ignorar carpetas de compilación y temporales
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# ==========================
+# 💻 SISTEMA / IDE
+# ==========================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
