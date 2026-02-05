@@ -6,7 +6,11 @@ import 'dart:async';
 // =========================================================
 // 1. CONFIGURACIÓN GLOBAL Y LOGIN (BLINDADO)
 // =========================================================
-const String baseUrl = "http://192.168.137.62:8000"; 
+
+//Usar esta para el EMULADOR (Desarrollo en PC)
+// const String baseUrl = "http://10.0.2.2:8000";
+
+const String baseUrl = "http://10.0.2.2:8000:8000"; 
 
 void main() {
   runApp(const MyApp());
