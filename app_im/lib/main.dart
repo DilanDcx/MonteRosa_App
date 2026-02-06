@@ -3,9 +3,9 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
 
-// =========================================================
-// 1. CONFIGURACIÓN GLOBAL Y LOGIN (BLINDADO)
-// =========================================================
+// ================================
+// 1. CONFIGURACIÓN GLOBAL Y LOGIN
+// ================================
 
 //Usar esta para el EMULADOR (Desarrollo en PC)
 // const String baseUrl = "http://10.0.2.2:8000";
@@ -38,7 +38,7 @@ class MyApp extends StatelessWidget {
           theme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.light,
-            // Esto se encarga de pintar casi todo de naranja automáticamente
+            // Constante de color
             colorScheme: ColorScheme.fromSeed(seedColor: colorIngenioOrange, brightness: Brightness.light),
             scaffoldBackgroundColor: const Color(0xFFF5F5F5),
             appBarTheme: const AppBarTheme(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white),
@@ -46,16 +46,16 @@ class MyApp extends StatelessWidget {
             floatingActionButtonTheme: const FloatingActionButtonThemeData(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white),
           ),
           
-          // --- TEMA OSCURO (SIN ERRORES) ---
+          // --- TEMA OSCURO ---
           darkTheme: ThemeData(
             useMaterial3: true,
             brightness: Brightness.dark,
             
-            // Esquema de color oscuro basado en naranja
+            // Esquema de color 
             colorScheme: ColorScheme.fromSeed(
               seedColor: colorIngenioOrange, 
               brightness: Brightness.dark,
-              surface: const Color(0xFF1E1E1E), // Color base para tarjetas
+              surface: const Color(0xFF1E1E1E),
             ),
             
             scaffoldBackgroundColor: const Color(0xFF121212), 
@@ -82,10 +82,6 @@ class MyApp extends StatelessWidget {
               backgroundColor: colorIngenioOrange, 
               foregroundColor: Colors.white
             ),
-            
-            // HE ELIMINADO 'tabBarTheme' y 'cardTheme' AQUÍ PORQUE CAUSABAN EL ERROR.
-            // No te preocupes, el 'LoginScreen' tiene su propio estilo manual que
-            // forzará el color naranja correctamente.
           ),
 
           home: const LoginScreen(),
@@ -123,7 +119,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     super.dispose();
   }
 
-  // --- LOGIN OPERARIO (CON DETECCIÓN DE "SIN NOMBRE") ---
+  // --- LOGIN OPERARIO ---
   Future<void> _loginOperario() async {
     FocusScope.of(context).unfocus();
     if (_opCodigoController.text.isEmpty) return;
@@ -142,25 +138,23 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         final data = json.decode(response.body);
         String codigo = data['codigo'].toString();
         
-        // 1. Limpiamos el nombre recibido
         var rawName = data['nombre'];
         String n = (rawName ?? "").toString().trim();
-        String nLower = n.toLowerCase(); // Para comparar fácil
+        String nLower = n.toLowerCase();
 
-        // 2. LISTA NEGRA: Textos que NO son nombres válidos
+        // 2. LISTA NEGRA: Textos que no son nombres válidos
         bool nombreInvalido = 
              n.isEmpty || 
              nLower == "null" || 
              nLower == "none" || 
              nLower.contains("sin nombre") || // <--- AQUÍ ESTÁ EL ARREGLO
              nLower.contains("no asignado") ||
-             n.length < 3; // Nombres de menos de 3 letras sospechosos
+             n.length < 3;
 
+        // Logica de guardar nombre en el servidor
         if (nombreInvalido) {
-           // Si el servidor dice "Sin nombre", nosotros decimos "Preguntar"
            if (mounted) _mostrarDialogoPedirNombre(codigo);
         } else {
-           // Si es un nombre real, pasamos
            _navegarAOrdenes(codigo, n); 
         }
       } else {
@@ -188,7 +182,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         actions: [
           ElevatedButton(
             onPressed: () async {
-              // Validamos que escriba algo decente
               if (nombreController.text.trim().length > 2) {
                 Navigator.pop(ctx);
                 await _actualizarNombreInicial(codigo, nombreController.text.trim());
@@ -303,7 +296,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   )
                 ),
                 
-                // Formularios (con altura fija para que no salten)
+                // Formularios
                 SizedBox(
                   height: 350, 
                   child: TabBarView(
@@ -323,7 +316,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             const SizedBox(height: 30),
                             if (cargando) const CircularProgressIndicator(color: colorIngenioOrange) 
                             else ElevatedButton(
-                              onPressed: _loginOperario, // Asegúrate de tener esta función
+                              onPressed: _loginOperario,
                               style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: colorIngenioOrange, foregroundColor: Colors.white), 
                               child: const Text("INGRESAR")
                             ),
@@ -342,7 +335,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                             const SizedBox(height: 30),
                             if (cargando) const CircularProgressIndicator(color: colorIngenioOrange) 
                             else ElevatedButton(
-                              onPressed: _loginAdmin, // Asegúrate de tener esta función
+                              onPressed: _loginAdmin,
                               style: ElevatedButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: const Color(0xFFE65100), foregroundColor: Colors.white), 
                               child: const Text("ACCESO ADMIN")
                             ),
@@ -360,9 +353,9 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     );
   }
 }
-// ==========================================
-// 2. PANEL DE ADMINISTRADOR (DASHBOARD - MODO OSCURO + NARANJA)
-// ==========================================
+// ==========================
+// 2. PANEL DE ADMINISTRADOR 
+// ==========================
 class AdminDashboard extends StatefulWidget {
   final String nombreAdmin;
   const AdminDashboard({super.key, required this.nombreAdmin});
@@ -404,7 +397,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   void _mostrarAlertaError(String titulo, String mensaje) {
     setState(() => cargando = false);
-    // Diálogo con estilo oscuro si es necesario
+    // Diálogo tema oscuro
     showDialog(context: context, builder: (ctx) {
         bool esOscuro = Theme.of(context).brightness == Brightness.dark;
         return AlertDialog(
@@ -418,7 +411,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   @override
   Widget build(BuildContext context) {
-    // DETECTAR MODO OSCURO
+
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
 
     return DefaultTabController(
@@ -472,7 +465,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ? const Center(child: CircularProgressIndicator(color: colorIngenioOrange)) 
           : TabBarView(children: [_listaAdmin(pendientes, esHistorial: false), _listaAdmin(completadas, esHistorial: true)]),
         
-        // BOTÓN AGREGAR (+) - Ahora Naranja
+        // BOTÓN AGREGAR (+)
         floatingActionButton: FloatingActionButton(
           backgroundColor: colorIngenioOrange, 
           child: const Icon(Icons.add, color: Colors.white), 
@@ -519,7 +512,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
         Color colorAvatar = _colorPrioridad(orden['prioridad']);
 
         return Card(
-          // CORRECCIÓN: Fondo de tarjeta oscuro en modo noche
           color: esOscuro ? Colors.grey[850] : Colors.white,
           elevation: 3, 
           margin: const EdgeInsets.symmetric(vertical: 6),
@@ -537,7 +529,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
             trailing: Row(mainAxisSize: MainAxisSize.min, children: [
                 if (!esHistorial) 
                   IconButton(
-                    // CORRECCIÓN: Icono Editar Naranja
                     icon: const Icon(Icons.edit, color: colorIngenioOrange), 
                     onPressed: () { 
                       Navigator.push(context, MaterialPageRoute(builder: (context) => EditarOrdenScreen(orden: orden))).then((_) { 
@@ -565,9 +556,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-// ==========================================
-// 3. FORMULARIO CREAR ORDEN (MODO OSCURO + NARANJA)
-// ==========================================
+// ==========================
+// 3. FORMULARIO CREAR ORDEN
+// ==========================
 class CrearOrdenScreen extends StatefulWidget {
   const CrearOrdenScreen({super.key});
 
@@ -624,7 +615,7 @@ class _CrearOrdenScreenState extends State<CrearOrdenScreen> {
     });
   }
 
-  // Diálogo para agregar actividad (Estilizado)
+  // Diálogo para agregar actividad
   void _mostrarDialogoActividad() {
     final descController = TextEditingController();
     final areaController = TextEditingController();
@@ -732,7 +723,6 @@ class _CrearOrdenScreenState extends State<CrearOrdenScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // DETECCIÓN DE MODO OSCURO
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -777,7 +767,7 @@ class _CrearOrdenScreenState extends State<CrearOrdenScreen> {
               ),
               const SizedBox(height: 20),
               
-              // BOTONES DE FECHA (Estilo Outline Naranja)
+              // BOTONES DE FECHA
               Row(
                 children: [
                   Expanded(
@@ -847,7 +837,7 @@ class _CrearOrdenScreenState extends State<CrearOrdenScreen> {
                 ),
               const SizedBox(height: 30),
               
-              // BOTÓN GUARDAR (Naranja)
+              // BOTÓN GUARDAR
               ElevatedButton(
                 onPressed: _guardarOrden,
                 style: ElevatedButton.styleFrom(
@@ -865,9 +855,9 @@ class _CrearOrdenScreenState extends State<CrearOrdenScreen> {
     );
   }
 }
-// ==========================================
-// 4. PANTALLA MIS ÓRDENES (MODO OSCURO + NARANJA)
-// ==========================================
+// ========================
+// 4. PANTALLA MIS ÓRDENES 
+// ========================
 class OrdenesScreen extends StatefulWidget {
   final String codigoTrabajador;
   final String nombreTrabajador; 
@@ -894,7 +884,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   }
 
   Future<void> fetchOrdenes() async {
-    // 1. Petición al servidor intentando filtrar
+    //  Petición al servidor intentando filtrar por codigo
     final url = Uri.parse('$baseUrl/api/ordenes/?trabajador=${widget.codigoTrabajador}');
     
     try {
@@ -933,7 +923,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   void _mostrarAlertaError(String titulo, String mensaje) {
     setState(() => cargando = false);
     
-    // Diálogo adaptado a modo oscuro
+    // Diálogo adaptado a temas
     showDialog(context: context, builder: (ctx) {
       bool esOscuro = Theme.of(context).brightness == Brightness.dark;
       return AlertDialog(
@@ -947,7 +937,6 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // DETECCIÓN DE MODO OSCURO
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
 
     return DefaultTabController(
@@ -974,7 +963,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
               onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()))
             )
           ],
-          // PESTAÑAS (TABS) - Colores corregidos
+          // PESTAÑAS (TABS) 
           bottom: TabBar(
             labelColor: esOscuro ? colorIngenioOrange : Colors.white, // Texto seleccionado
             unselectedLabelColor: esOscuro ? Colors.grey : Colors.white70, // Texto no seleccionado
@@ -1018,7 +1007,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
     }
 
     return RefreshIndicator(
-      color: colorIngenioOrange, // Spinner naranja
+      color: colorIngenioOrange,
       onRefresh: fetchOrdenes,
       child: ListView.builder(
         padding: const EdgeInsets.all(10),
@@ -1031,7 +1020,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
              letraAvatar = orden['ubicacion'][0].toUpperCase();
           }
           
-          Color colorAvatar = colorIngenioOrange; // Por defecto Naranja (antes era Orange)
+          Color colorAvatar = colorIngenioOrange;
           if (orden['prioridad'] == 'ALTA') colorAvatar = Colors.red;
           if (orden['prioridad'] == 'BAJA') colorAvatar = Colors.green;
           Color colorFinal = esHistorial ? Colors.green : colorAvatar;
@@ -1072,9 +1061,9 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
     );
   }
 }
-// ==========================================
-// 5. DETALLE DE ORDEN (MODO OSCURO + NARANJA)
-// ==========================================
+// ====================
+// 5. DETALLE DE ORDEN
+// ====================
 class DetalleOrdenScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
   final String nombreTrabajador;
@@ -1111,7 +1100,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   }
 
   Future<void> _finalizarOrdenCompleta() async {
-    // Detectar modo oscuro para el diálogo
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
     
     bool? confirmar = await showDialog(
@@ -1184,7 +1172,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Widget build(BuildContext context) {
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
     
-    // 1. SEPARAMOS LISTAS
+    // SEPARACIÓN DE LISTAS
     List<dynamic> todas = ordenActual['actividades'] ?? [];
     List<dynamic> pendientes = todas.where((a) => a['completada'] == false).toList();
     List<dynamic> terminadas = todas.where((a) => a['completada'] == true).toList();
@@ -1199,7 +1187,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       ),
       body: Column(
         children: [
-          // CABECERA (Adaptable al modo oscuro)
+          // CABECERA
           Container(
             padding: const EdgeInsets.all(16),
             color: esOscuro ? Colors.grey[850] : Colors.white, // Fondo oscuro o blanco
@@ -1226,7 +1214,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 if (pendientes.isNotEmpty) ...[
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8), 
-                    // Título Naranja en lugar de Azul
+                    // Título Naranja
                     child: Row(
                       children: const [
                         Icon(Icons.push_pin, color: colorIngenioOrange, size: 20),
@@ -1250,7 +1238,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
             ),
           ),
           
-          // BOTÓN FINALIZAR ORDEN (Ahora Naranja)
+          // BOTÓN FINALIZAR ORDEN
           if (!ordenCerrada && pendientes.isEmpty)
             Padding(
               padding: const EdgeInsets.all(16), 
@@ -1262,7 +1250,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                     label: const Text("FINALIZAR ORDEN"), 
                     style: ElevatedButton.styleFrom(
                       minimumSize: const Size(double.infinity, 50), 
-                      backgroundColor: colorIngenioOrange, // Fondo Naranja
+                      backgroundColor: colorIngenioOrange,
                       foregroundColor: Colors.white
                     )
                   )
@@ -1326,7 +1314,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ? const Icon(Icons.check_circle, color: Colors.green) 
           : ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: colorIngenioOrange, // Botón ABRIR naranja
+                backgroundColor: colorIngenioOrange,
                 foregroundColor: Colors.white,
               ),
               child: const Text("ABRIR"),
@@ -1346,9 +1334,9 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     );
   }
 }
-// ==========================================
-// 6. PANTALLA DE EJECUCIÓN (MODO OSCURO + NARANJA + CÁLCULO OFFLINE)
-// ==========================================
+// =========================
+// 6. PANTALLA DE EJECUCIÓN
+// =========================
 class EjecucionActividadScreen extends StatefulWidget {
   final Map<String, dynamic> actividad;
   final String nombreTrabajador; 
@@ -1414,7 +1402,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     _enProgreso = actividadData['en_progreso'] ?? false;
     _finalizado = actividadData['completada'] ?? false;
 
-    // CÁLCULO OFFLINE (Lógica intacta)
+    // CÁLCULO OFFLINE
     if (_enProgreso && !_finalizado && _historialBitacora.isNotEmpty) {
       try {
         var ultimoEvento = _historialBitacora.last;
@@ -1499,7 +1487,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     } catch (e) { print(e); }
   }
 
-  // BOTÓN INICIAR INTELIGENTE (Con Diálogo Oscuro)
+  // BOTÓN INICIAR INTELIGENTE
   Future<void> _botonIniciar() async {
     bool nombreInvalido = widget.nombreTrabajador == "null" || widget.nombreTrabajador.trim().isEmpty;
     bool faltaNombreManual = _nombreManualController.text.isEmpty;
@@ -1540,7 +1528,6 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
 
   @override
   Widget build(BuildContext context) {
-    // DETECCIÓN DE MODO OSCURO
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
     
     String reloj = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
@@ -1553,7 +1540,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       ),
       body: Column(
         children: [
-          // CAJA DEL CRONÓMETRO (Adaptada)
+          // CAJA DEL CRONÓMETRO
           Container(
             padding: const EdgeInsets.symmetric(vertical: 20),
             // Fondo oscuro en noche, Blanco en día
@@ -1569,13 +1556,13 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
                   ),
                 ),
                 const SizedBox(height: 10),
-                // NÚMEROS DEL RELOJ (Ahora Naranja)
+                // NÚMEROS DEL RELOJ
                 Text(
                   reloj, 
                   style: const TextStyle(
                     fontSize: 50, 
                     fontWeight: FontWeight.bold, 
-                    color: colorIngenioOrange, // <<-- CAMBIO CLAVE A NARANJA
+                    color: colorIngenioOrange,
                     fontFamily: 'monospace'
                   )
                 ),
@@ -1588,7 +1575,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
           // BITÁCORA DE EVENTOS
           Expanded(
             child: Container(
-              color: esOscuro ? Colors.black : Colors.grey[100], // Fondo de la lista
+              color: esOscuro ? Colors.black : Colors.grey[100],
               child: ListView.separated(
                 itemCount: _historialBitacora.length,
                 separatorBuilder: (_, __) => Divider(height: 1, color: esOscuro ? Colors.grey[800] : Colors.grey[300]),
@@ -1666,9 +1653,9 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     );
   }
 }
-// ==========================================
-// 7. PANTALLA DE EDITAR ORDEN (MODO ADMIN/SUPERVISOR + MODO OSCURO)
-// ==========================================
+// ============================
+// 7. PANTALLA DE EDITAR ORDEN 
+// ============================
 class EditarOrdenScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
   const EditarOrdenScreen({super.key, required this.orden});
@@ -1724,7 +1711,7 @@ class _EditarOrdenScreenState extends State<EditarOrdenScreen> {
     _actividadesExistentes = List.from(o['actividades'] ?? []);
   }
 
-  // LÓGICA: SELECTORES DE FECHA Y HORA (Con tema Naranja)
+  // LÓGICA: SELECTORES DE FECHA Y HORA
   Future<void> _seleccionarFechaHora(bool esInicio) async {
     DateTime base = esInicio ? _inicio : _fin;
     
@@ -1761,7 +1748,7 @@ class _EditarOrdenScreenState extends State<EditarOrdenScreen> {
     });
   }
 
-  // LÓGICA: AGREGAR NUEVA ACTIVIDAD (Dialogo Oscuro/Claro)
+  // LÓGICA: AGREGAR NUEVA ACTIVIDAD
   void _mostrarDialogoActividad() {
     final descController = TextEditingController();
     final areaController = TextEditingController();
@@ -1867,7 +1854,6 @@ class _EditarOrdenScreenState extends State<EditarOrdenScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Detectar modo oscuro
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
@@ -1903,7 +1889,7 @@ class _EditarOrdenScreenState extends State<EditarOrdenScreen> {
               TextFormField(controller: _procesoController, decoration: const InputDecoration(labelText: "Proceso"), validator: (v) => v!.isEmpty ? "Requerido" : null),
               const SizedBox(height: 10),
               
-              // Selector de Fechas (Outline Naranja)
+              // Selector de Fechas
               Row(children: [
                  Expanded(
                    child: OutlinedButton(
@@ -1969,7 +1955,7 @@ class _EditarOrdenScreenState extends State<EditarOrdenScreen> {
 
               const SizedBox(height: 30),
               
-              // BOTÓN GUARDAR (Naranja)
+              // BOTÓN GUARDAR
               ElevatedButton(
                 onPressed: _guardarCambios, 
                 style: ElevatedButton.styleFrom(
