@@ -10,7 +10,7 @@ import 'dart:async';
 //Usar esta para el EMULADOR (Desarrollo en PC)
 // const String baseUrl = "http://10.0.2.2:8000";
 
-const String baseUrl = "http://10.0.2.2:8000"; 
+const String baseUrl = "http://192.168.137.62:8000"; 
 
 const Color colorIngenioOrange = Color(0xFFEF7D00);
 
