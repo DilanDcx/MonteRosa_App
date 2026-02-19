@@ -1,165 +1,122 @@
 from django.db import models
 from datetime import timedelta
+from django.contrib.auth.models import User
 
-class Trabajador(models.Model):
-    ROLES = [('ADMIN', 'Administrador'), ('OPERARIO', 'Operario')]
-    
-    nombre = models.CharField(max_length=100)
-    codigo = models.CharField(max_length=20, unique=True) # El ID de login
-    rol = models.CharField(max_length=10, choices=ROLES, default='OPERARIO')
-
-    def __str__(self):
-        return f"{self.nombre} ({self.rol})"
-    
+# 1. ORDEN DE TRABAJO (PADRE)
 class OrdenTrabajo(models.Model):
-    # --- DATOS GENERALES (ADMIN) ---
-    numero_orden = models.CharField(max_length=20, unique=True)
-    fecha_creacion = models.DateField(auto_now_add=True) # Se pone sola la fecha de hoy
+    # Identificadores SAP
+    numero_orden = models.CharField(max_length=20, unique=True, verbose_name="Número de Orden")
+    descripcion = models.CharField(max_length=255, verbose_name="Texto Breve", null=True, blank=True)
     
-    # Datos del Supervisor
-    supervisor_nombre = models.CharField(max_length=100)
-    supervisor_codigo = models.CharField(max_length=20)
+    # Equipo y Ubicación
+    equipo = models.CharField(max_length=50, verbose_name="Equipo", null=True, blank=True)
+    descripcion_equipo = models.CharField(max_length=255, verbose_name="Desc. Equipo", null=True, blank=True)
+    ubicacion = models.CharField(max_length=100, verbose_name="Ubicación Técnica", null=True, blank=True)
+    ubicacion_tecnica = models.CharField(max_length=150, verbose_name="Desc. Ubicación", null=True, blank=True)
     
-    # Asignación 
-    codigo_trabajador = models.CharField(max_length=20, help_text="Código del operario asignado")
-    
-    # Ubicaciones y Proceso
-    ubicacion = models.CharField(max_length=100) # Ej: Molinos
-    ubicacion_tecnica = models.CharField(max_length=100) # Ej: M-204
-    proceso = models.CharField(max_length=100) # Ej: Molienda
-    
-    # Planificación
-    PRIORIDAD_CHOICES = [('ALTA', 'Alta'), ('MEDIA', 'Media'), ('BAJA', 'Baja')]
-    prioridad = models.CharField(max_length=10, choices=PRIORIDAD_CHOICES, default='MEDIA')
-    reserva = models.CharField(max_length=50, blank=True, null=True) # Materiales reservados
-    
-    inicio_programado = models.DateTimeField()
-    fin_programado = models.DateTimeField()
+    # Fechas
+    fecha_creacion = models.DateField(auto_now_add=True)
+    inicio_programado = models.DateTimeField(null=True, blank=True, verbose_name="Inicio")
+    fin_programado = models.DateTimeField(null=True, blank=True, verbose_name="Fin")
 
-    tiempo_total = models.DurationField(
-        null=True, 
-        blank=True, 
-        verbose_name="Tiempo Total de Ejecución",
-        help_text="Calculado automáticamente al finalizar la orden"
-    )
-
-    tiempo_pausas = models.DurationField(
-        default=timedelta(0), # Empieza en 0
-        verbose_name="Tiempo Acumulado de Pausas"
+    # Gestión (Prioridad y Asignación)
+   # Gestión (Prioridad y Asignación)
+    PRIORIDAD_CHOICES = [
+        ('1', '1-Muy alto'),
+        ('2', '2-Alto'),
+        ('3', '3-Medio'),
+        ('4', '4-Bajo'),
+    ]
+    prioridad = models.CharField(
+        max_length=2, 
+        choices=PRIORIDAD_CHOICES, 
+        default='4', # Ahora el default por si viene vacío será "4-Bajo"
+        verbose_name="Prioridad"
     )
     
-    fecha_fin_real = models.DateTimeField(
-        null=True, blank=True,
-        verbose_name="Fecha Real de Finalización"
-    )
-
-    # Estado General de la Orden
-    completada = models.BooleanField(default=False)
+    codigo_trabajador = models.CharField(max_length=20, null=True, blank=True, verbose_name="Código Operario")
+    supervisor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="Asignado por")
+    
+    # --- NUEVO SISTEMA DE ESTADOS ---
+    ESTADOS = [
+        ('BORRADOR', 'Borrador (Revisión)'),   # Recién importada
+        ('PENDIENTE', 'Pendiente (En App)'),   # Lista para trabajar
+        ('FINALIZADA', 'Finalizada'),          # Terminada
+    ]
+    estado = models.CharField(max_length=20, choices=ESTADOS, default='BORRADOR', verbose_name="Estado Actual")
+    
+    # KPIs
+    tiempo_total = models.DurationField(null=True, blank=True)
+    fecha_fin_real = models.DateTimeField(null=True, blank=True)
 
     def __str__(self):
-        return f"Orden {self.numero_orden} - {self.codigo_trabajador}"
-    
-# --- CONFIGURACIÓN VISUAL INGENIO MONTE ROSA ---
-JAZZMIN_SETTINGS = {
-    "site_title": "Monte Rosa Admin",
-    "site_header": "Ingenio Monte Rosa",
-    "site_brand": "Gestión Operativa",
-    "welcome_sign": "Bienvenido al Panel de Control",
-    "copyright": "Ingenio Monte Rosa S.A.",
-    "search_model": ["app_im.Orden", "auth.User"], # Barra de búsqueda global
-    
-    # Menú Lateral
-    "show_sidebar": True,
-    "navigation_expanded": True,
-    
-    # Iconos (FontAwesome 5)
-    "icons": {
-        "auth": "fas fa-users-cog",
-        "auth.user": "fas fa-user",
-        "auth.Group": "fas fa-users",
-        "app_im.Orden": "fas fa-clipboard-list",
-        "app_im.OrdenPendiente": "fas fa-clock",    # Icono reloj para pendientes
-        "app_im.OrdenHistorial": "fas fa-check-circle", # Icono check para historial
-    },
-}
+        return f"{self.numero_orden} ({self.estado})"
 
-JAZZMIN_UI_TWEAKS = {
-    "theme": "darkly",   # Tema Oscuro Base (Profesional)
-    # "theme": "flatly", # Usa este si prefieres tema claro por defecto
-    
-    "navbar": "navbar-warning navbar-dark", # Barra superior Naranja
-    "sidebar": "sidebar-dark-warning",      # Menú oscuro con detalles naranjas
-    "brand_colour": "navbar-warning",
-    "accent": "accent-warning",             # Detalles interactivos en naranja
-    "button_classes": {
-        "primary": "btn-warning",           # Botones principales naranjas
-        "secondary": "btn-secondary",
-        "info": "btn-info",
-        "warning": "btn-warning",
-        "danger": "btn-danger",
-        "success": "btn-success"
-    }
-}
-
+# 2. ACTIVIDAD (HIJO)
 class Actividad(models.Model):
     orden = models.ForeignKey(OrdenTrabajo, related_name='actividades', on_delete=models.CASCADE)
-    
-    # --- DATOS DEL ADMIN ---
-    codigo_actividad = models.CharField(max_length=10, editable=False) # Se llenará solo (0010, 0020)
-    descripcion = models.TextField()
-    area = models.CharField(max_length=50) # Ej: Eléctrica, Mecánica
-    tiempo_planificado = models.DurationField(help_text="Formato HH:MM:SS") 
-    
-    # --- DATOS DEL TRABAJADOR (EJECUCIÓN) ---
-    nombre_ejecutor = models.CharField(max_length=100, blank=True, null=True) # Quien la hizo realmente
-    fecha_hora_inicio_real = models.DateTimeField(null=True, blank=True)
-    fecha_hora_fin_real = models.DateTimeField(null=True, blank=True)
-    
-    # Cronómetro
-    tiempo_real_acumulado = models.DurationField(default=timedelta(0)) # Suma de tiempos
-    en_progreso = models.BooleanField(default=False) # ¿Está corriendo el reloj?
-    ultima_pausa = models.DateTimeField(null=True, blank=True) # Para cálculos de pausas
-    
-    completada = models.BooleanField(default=False)
-    notas_operario = models.TextField(blank=True, null=True) # Descripción opcional final
+    codigo_operacion = models.CharField(max_length=10, verbose_name="Op.", null=True, blank=True)
+    descripcion = models.TextField(verbose_name="Txt. Breve Op.")
+    puesto_trabajo = models.CharField(max_length=20, verbose_name="Pto. Trabajo", null=True, blank=True)
 
-    def save(self, *args, **kwargs):
-        # Lógica Mágica: Si no tiene código (0010), lo calculamos
-        if not self.codigo_actividad:
-            # Contamos cuántas actividades tiene esta orden y sumamos 1
-            count = Actividad.objects.filter(orden=self.orden).count()
-            # Formato: (count + 1) * 10 -> 1*10=10, 2*10=20...
-            numero = (count + 1) * 10
-            # Rellenamos con ceros: "0010", "0020"
-            self.codigo_actividad = f"{numero:04d}" 
-        super().save(*args, **kwargs)
+    finished = models.BooleanField(default=False)
+    tiempo_real_acumulado = models.DurationField(default=timedelta(0))
+    en_progreso = models.BooleanField(default=False)
+    ultima_pausa = models.DateTimeField(null=True, blank=True)
+    notas_operario = models.TextField(blank=True, null=True)
+
+    # --- CAMPOS DE TIEMPOS Y AUDITORÍA ---
+    fecha_inicio_real = models.DateTimeField(null=True, blank=True, verbose_name="Inicio Real")
+    fecha_fin_real = models.DateTimeField(null=True, blank=True, verbose_name="Fin Real")
+    tiempo_real_acumulado = models.CharField(max_length=20, null=True, blank=True, verbose_name="Tiempo Activo")
+    tiempo_pausas = models.CharField(max_length=20, null=True, blank=True, verbose_name="Tiempo en Pausa")
+    nombre_ejecutor = models.CharField(max_length=100, null=True, blank=True, verbose_name="Ejecutor")
+    finished = models.BooleanField(default=False)
 
     def __str__(self):
-        return f"{self.codigo_actividad} - {self.descripcion}"
+        return f"{self.codigo_operacion} - {self.descripcion}"
+
+# 3. BITACORA
 class BitacoraActividad(models.Model):
     actividad = models.ForeignKey(Actividad, related_name='bitacora', on_delete=models.CASCADE)
-    EVENTOS = [
-        ('INICIO', 'Iniciado'),
-        ('PAUSA', 'Pausado'),
-        ('REANUDAR', 'Reanudado'),
-        ('FINAL', 'Finalizado'),
-    ]
+    EVENTOS = [('INICIO', 'Iniciado'), ('PAUSA', 'Pausado'), ('REANUDAR', 'Reanudado'), ('FINAL', 'Finalizado')]
     evento = models.CharField(max_length=20, choices=EVENTOS)
     fecha_hora = models.DateTimeField(auto_now_add=True)
 
-    def __str__(self):
-        return f"{self.actividad.codigo_actividad} - {self.evento} - {self.fecha_hora}"
-    
-# Modelo para ver las Pendientes en el menú
+# 4. MODELOS PROXY (PARA EL MENÚ)
+class OrdenBorrador(OrdenTrabajo):
+    class Meta:
+        proxy = True
+        verbose_name = "1. Borradores"
+        verbose_name_plural = "1. Borradores"
+
 class OrdenPendiente(OrdenTrabajo):
     class Meta:
         proxy = True
-        verbose_name = "Orden Pendiente"
-        verbose_name_plural = "Órdenes Pendientes"
+        verbose_name = "2. Órdenes en Curso"
+        verbose_name_plural = "2. Órdenes en Curso"
 
-# Modelo para ver el Historial en el menú
 class OrdenHistorial(OrdenTrabajo):
     class Meta:
         proxy = True
-        verbose_name = "Historial Finalizado"
-        verbose_name_plural = " Historial de Órdenes"
+        verbose_name = "3. Historial Finalizado"
+        verbose_name_plural = "3. Historial Finalizado"
+
+# 5. EVIDENCIAS FOTOGRÁFICAS
+class Evidencia(models.Model):
+    orden = models.ForeignKey(OrdenTrabajo, related_name='evidencias', on_delete=models.CASCADE)
+    actividad = models.ForeignKey(Actividad, on_delete=models.CASCADE, null=True, blank=True)
+    # Las fotos se guardarán ordenadas por año y mes en la carpeta /media/
+    foto = models.ImageField(upload_to='evidencias/%Y/%m/', verbose_name="Fotografía")
+    
+    TIPOS = [
+        ('ANTES', 'Antes del trabajo'),
+        ('DURANTE', 'Durante el trabajo'),
+        ('DESPUES', 'Trabajo finalizado')
+    ]
+    tipo = models.CharField(max_length=10, choices=TIPOS, default='DESPUES')
+    descripcion = models.CharField(max_length=255, blank=True, null=True, verbose_name="Nota (Opcional)")
+    fecha_subida = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return f"{self.get_tipo_display()} - Orden {self.orden.numero_orden}"

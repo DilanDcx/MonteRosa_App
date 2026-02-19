@@ -1,0 +1,26 @@
+/* Liberamos el botón de Guardar y lo pegamos a la pantalla (Fijado) */
+#changelist-form input[name="_save"] {
+    position: fixed !important;
+    bottom: 20px !important;
+    right: 20px !important;
+    z-index: 99999 !important; /* Siempre por encima de todo */
+    background-color: #EF7D00 !important; /* Naranja Monte Rosa */
+    color: white !important;
+    font-size: 10px !important;
+    font-weight: bold !important;
+    padding: 15px 25px !important;
+    border-radius: 30px !important; /* Forma de píldora moderna */
+    border: 1px solid #ffffff !important; /* Borde blanco para resaltar en modo oscuro */
+    box-shadow: 0 10px 10px rgba(0, 0, 0, 0.4) !important;
+    cursor: pointer !important;
+    transition: all 0.3s ease !important;
+    text-transform: uppercase !important;
+    letter-spacing: 1px !important;
+}
+
+/* Efecto al pasar el mouse (se levanta y brilla) */
+#changelist-form input[name="_save"]:hover {
+    background-color: #d66e00 !important;
+    transform: translateY(-5px) scale(1.05) !important;
+    box-shadow: 0 15px 25px rgba(239, 125, 0, 0.5) !important;
+}
