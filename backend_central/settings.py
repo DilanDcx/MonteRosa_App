@@ -1,40 +1,36 @@
 from pathlib import Path
 import os
 
-# 1. DEFINIMOS BASE_DIR PRIMERO (Cimiento de la casa)
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# 2. SEGURIDAD
+# SEGURIDAD
 SECRET_KEY = 'django-insecure-ro%mzvgkvhxj4#j1zux79$q9=oy0#)wv6+xl$ubk2fgrc79u91'
 DEBUG = True
 ALLOWED_HOSTS = ['*']
 
-# 3. APPS INSTALADAS
+# APPS INSTALADAS
 INSTALLED_APPS = [
-    'jazzmin', # Panel bonito
+    'jazzmin',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    # Apps de terceros
     'rest_framework',
     'rest_framework.authtoken',
     'corsheaders',
-    'import_export', # Para subir Excel
-    # Mis Apps
+    'import_export',
     'ordenes',
 ]
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
 
-# 4. MIDDLEWARE
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware', # Recomendado para conectar con Flutter
+    'corsheaders.middleware.CorsMiddleware', 
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -61,7 +57,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend_central.wsgi.application'
 
-# 5. BASE DE DATOS
+#BASE DE DATOS
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
@@ -69,7 +65,7 @@ DATABASES = {
     }
 }
 
-# 6. PASSWORD VALIDATORS
+# CONTRASENAS
 AUTH_PASSWORD_VALIDATORS = [
     {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
     {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',},
@@ -78,12 +74,12 @@ AUTH_PASSWORD_VALIDATORS = [
 ]
 
 # 7. IDIOMA Y ZONA
-LANGUAGE_CODE = 'es-ni' # Configurado para español Nicaragua (Opcional)
-TIME_ZONE = 'America/Managua' # Ajusta a tu zona horaria
+LANGUAGE_CODE = 'es-ni' 
+TIME_ZONE = 'America/Managua'
 USE_I18N = True
 USE_TZ = True
 
-# 8. ARCHIVOS ESTÁTICOS (Ahora sí funciona porque BASE_DIR ya existe)
+# SARCHIVOS ESTÁTICOS
 STATIC_URL = '/static/' 
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),

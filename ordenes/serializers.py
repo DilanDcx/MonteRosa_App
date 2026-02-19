@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from .models import OrdenTrabajo, Actividad, BitacoraActividad, Evidencia # <-- Importamos Evidencia
 
-# 1. Serializer para Usuarios (Sustituye a Trabajador)
+# 1. Serializer para Usuarios
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
@@ -14,16 +14,15 @@ class BitacoraSerializer(serializers.ModelSerializer):
         model = BitacoraActividad
         fields = '__all__'
 
-# 3. NUEVO: Serializer para Evidencias (Fotos)
+# 3. Serializer para Evidencias
 class EvidenciaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Evidencia
         fields = '__all__'
-        read_only_fields = ['fecha_subida'] # La fecha se pone sola, Flutter no necesita enviarla
+        read_only_fields = ['fecha_subida']
 
 # 4. Serializer para Actividades
 class ActividadSerializer(serializers.ModelSerializer):
-    # Incluimos la bitácora anidada (solo lectura) para ver historial en la app
     bitacora = BitacoraSerializer(many=True, read_only=True)
     evidencias = EvidenciaSerializer(many=True, read_only=True, source='evidencia_set')
 
@@ -36,9 +35,8 @@ class ActividadSerializer(serializers.ModelSerializer):
 
 # 5. Serializer para Órdenes
 class OrdenTrabajoSerializer(serializers.ModelSerializer):
-    # Anidamos Actividades y Evidencias para que Flutter reciba el paquete completo
     actividades = ActividadSerializer(many=True, read_only=True)
-    evidencias = EvidenciaSerializer(many=True, read_only=True) # <-- Flutter leerá las fotos aquí
+    evidencias = EvidenciaSerializer(many=True, read_only=True) 
 
     class Meta:
         model = OrdenTrabajo

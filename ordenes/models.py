@@ -19,7 +19,6 @@ class OrdenTrabajo(models.Model):
     inicio_programado = models.DateTimeField(null=True, blank=True, verbose_name="Inicio")
     fin_programado = models.DateTimeField(null=True, blank=True, verbose_name="Fin")
 
-    # Gestión (Prioridad y Asignación)
    # Gestión (Prioridad y Asignación)
     PRIORIDAD_CHOICES = [
         ('1', '1-Muy alto'),
@@ -30,7 +29,7 @@ class OrdenTrabajo(models.Model):
     prioridad = models.CharField(
         max_length=2, 
         choices=PRIORIDAD_CHOICES, 
-        default='4', # Ahora el default por si viene vacío será "4-Bajo"
+        default='4',
         verbose_name="Prioridad"
     )
     
@@ -39,9 +38,9 @@ class OrdenTrabajo(models.Model):
     
     # --- NUEVO SISTEMA DE ESTADOS ---
     ESTADOS = [
-        ('BORRADOR', 'Borrador (Revisión)'),   # Recién importada
-        ('PENDIENTE', 'Pendiente (En App)'),   # Lista para trabajar
-        ('FINALIZADA', 'Finalizada'),          # Terminada
+        ('BORRADOR', 'Borrador (Revisión)'),  
+        ('PENDIENTE', 'Pendiente (En App)'), 
+        ('FINALIZADA', 'Finalizada'),     
     ]
     estado = models.CharField(max_length=20, choices=ESTADOS, default='BORRADOR', verbose_name="Estado Actual")
     

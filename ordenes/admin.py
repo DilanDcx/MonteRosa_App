@@ -12,9 +12,9 @@ from django.contrib.auth.models import User, Group
 from django.contrib.auth.admin import UserAdmin
 from django.contrib.admin import helpers
 
-# ---------------------------------------------------------
+# -------------------------
 # 1. LÓGICA DE IMPORTACIÓN
-# ---------------------------------------------------------
+# -------------------------
 class ActividadResource(resources.ModelResource):
     orden = fields.Field(
         attribute='orden', 
@@ -25,7 +25,6 @@ class ActividadResource(resources.ModelResource):
     descripcion = fields.Field(attribute='descripcion', column_name='Txt.brv.oper.')
     puesto_trabajo = fields.Field(attribute='puesto_trabajo', column_name='Pto.tbjo.op.')
     
-    # NUEVO: Recibimos al usuario que nos manda el Admin
     def __init__(self, user=None, **kwargs):
         super().__init__(**kwargs)
         self.user = user
@@ -68,7 +67,6 @@ class ActividadResource(resources.ModelResource):
         if prioridad_excel and prioridad_excel[0] in ['1', '2', '3', '4']:
             prioridad_db = prioridad_excel[0]
         
-        # Guardamos la orden y le inyectamos al Supervisor
         OrdenTrabajo.objects.update_or_create(
             numero_orden=numero_orden_excel,
             defaults={
@@ -80,14 +78,14 @@ class ActividadResource(resources.ModelResource):
                 'inicio_programado': fecha_inicio,
                 'fin_programado': fecha_fin,
                 'estado': 'BORRADOR',
-                'prioridad': prioridad_db, # <-- Faltaba una coma aquí
+                'prioridad': prioridad_db,
                 'supervisor': self.user
             }
         )
 
-# ---------------------------------------------------------
-# PANTALLA 1: BORRADORES (CON BOTONES DE ACCIÓN RÁPIDA)
-# ---------------------------------------------------------
+# -----------------------
+# PANTALLA 1: BORRADORES 
+# -----------------------
 class ActividadInline(admin.TabularInline):
     model = Actividad
     fk_name = 'orden'
@@ -98,15 +96,13 @@ class ActividadInline(admin.TabularInline):
     verbose_name = "Operación Detectada"
     verbose_name_plural = "Operaciones (Actividades)"
 
-# 1. EL CAMBIO MÁGICO: StackedInline en lugar de TabularInline
 class EvidenciaInline(admin.StackedInline): 
     model = Evidencia
     fk_name = 'orden'
     extra = 0
     
-    # 2. AQUÍ ESTÁN LOS TEXTOS DEL ENCABEZADO:
-    verbose_name = "Fotografía de Respaldo" # Cómo se llama UNA sola foto
-    verbose_name_plural = "📸 Panel de Evidencias Fotográficas" # El título gigante arriba
+    verbose_name = "Fotografía de Respaldo"
+    verbose_name_plural = "📸 Panel de Evidencias Fotográficas" 
     
     readonly_fields = ('ver_foto', 'fecha_subida')
     fields = ('tipo', 'ver_foto', 'descripcion', 'fecha_subida')
@@ -116,14 +112,12 @@ class EvidenciaInline(admin.StackedInline):
             from django.utils.html import format_html
             return format_html(
                 '<a href="{0}" target="_blank">'
-                # Hice la imagen más grande (250px) ya que ahora hay más espacio
                 '<img src="{0}" style="height: 250px; border-radius: 8px; border: 2px solid #ddd; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);"/>'
                 '</a>', 
                 obj.foto.url
             )
         return "Sin imagen"
-    
-    # ESTE ES EL TEXTO DE LA COLUMNA DE LA FOTO:
+
     ver_foto.short_description = "Vista Previa de la Imagen"
 
 @admin.register(OrdenBorrador)
@@ -147,7 +141,6 @@ class OrdenBorradorAdmin(ImportExportModelAdmin):
     class Media:
         css = { 'all': ('css/flotante.css',) }
 
-    # PASAMOS EL USUARIO DE LA SESIÓN AL IMPORTADOR
     def get_import_resource_kwargs(self, request, *args, **kwargs):
         kwargs = super().get_import_resource_kwargs(request, *args, **kwargs)
         kwargs.update({"user": request.user}) 
@@ -231,9 +224,9 @@ class OrdenBorradorAdmin(ImportExportModelAdmin):
         return "-"
     ver_fechas.short_description = "Inicio"
 
-# ---------------------------------------------------------
+# -----------------------
 # PANTALLA 2: PENDIENTES
-# ---------------------------------------------------------
+# -----------------------
 @admin.register(OrdenPendiente)
 class OrdenPendienteAdmin(admin.ModelAdmin):
     list_display = ('numero_orden', 'descripcion', 'codigo_trabajador', 'prioridad', 'ver_equipo_simple')
@@ -252,18 +245,16 @@ class OrdenPendienteAdmin(admin.ModelAdmin):
         return "-"
     ver_equipo_simple.short_description = "Equipo"
 
-# ---------------------------------------------------------
-# PANTALLA 3: HISTORIAL (ESTILIZADO)
-# ---------------------------------------------------------
+# ----------------------
+# PANTALLA 3: HISTORIAL
+# ----------------------
 
-# 1. CAMBIO A STACKED_INLINE: Esto hace que se vea como Tarjetas y no como Excel
 class ActividadHistorialInline(admin.StackedInline):
     model = Actividad
     fk_name = 'orden'
     extra = 0
     can_delete = False
     
-    # 2. CAMBIO DE NOMBRE EXACTO
     verbose_name = "Operación Finalizada"
     verbose_name_plural = "Operaciones (Actividades)"
     
@@ -290,7 +281,6 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         return super().get_queryset(request).filter(estado='FINALIZADA')
 
-    # 3. UNIFICACIÓN TOTAL: Todos los datos generales en un solo visor
     fields = (
         'numero_orden', 'descripcion', 'equipo', 'descripcion_equipo', 
         'ubicacion', 'ubicacion_tecnica', 'inicio_programado', 'fin_programado', 

@@ -7,8 +7,6 @@ from datetime import timedelta
 from rest_framework.authtoken.models import Token
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
-
-# Importamos los modelos y serializers
 from .models import OrdenTrabajo, Actividad, BitacoraActividad, Evidencia
 from .serializers import (
     OrdenTrabajoSerializer, 
@@ -57,7 +55,7 @@ def registro_app(request):
         'es_admin': False
     }, status=201)
 
-# --- VISTAS ESTÁNDAR (CRUD) ---
+# --- VISTAS ESTÁNDAR ---
 
 class OrdenTrabajoViewSet(viewsets.ModelViewSet):
     queryset = OrdenTrabajo.objects.all().order_by('-id')
@@ -79,14 +77,11 @@ class ActividadViewSet(viewsets.ModelViewSet):
         try:
             actividad = self.get_object()
             
-            # 1. FECHAS EXACTAS
             fecha_inicio = request.data.get('fecha_inicio_real')
             fecha_fin = request.data.get('fecha_fin_real')
             if fecha_inicio: actividad.fecha_inicio_real = fecha_inicio
             if fecha_fin: actividad.fecha_fin_real = fecha_fin
                 
-            # 2. FIX DEL TIEMPO (Evita el error de "113000000")
-            # Convertimos el string "01:30:00" a formato matemático de reloj para Django
             tiempo_total = request.data.get('tiempo_total') or request.data.get('tiempo_real_acumulado')
             if tiempo_total:
                 horas, minutos, segundos = map(int, str(tiempo_total).split(':'))
@@ -97,7 +92,6 @@ class ActividadViewSet(viewsets.ModelViewSet):
                 horas_p, minutos_p, segundos_p = map(int, str(tiempo_pausas).split(':'))
                 actividad.tiempo_pausas = timedelta(hours=horas_p, minutes=minutos_p, seconds=segundos_p)
                 
-            # 3. EJECUTOR
             ejecutor = request.data.get('nombre_ejecutor')
             if ejecutor: actividad.nombre_ejecutor = ejecutor
 
@@ -114,22 +108,20 @@ class ActividadViewSet(viewsets.ModelViewSet):
         except Exception as e:
             return Response({"Error Interno de Python": str(e)}, status=400)
 
-# --- CORRECCIÓN DE FOTOS: Agregamos AllowAny para que Flutter no sea bloqueado ---
 class EvidenciaViewSet(viewsets.ModelViewSet):
     queryset = Evidencia.objects.all()
     serializer_class = EvidenciaSerializer
-    permission_classes = [AllowAny] # LA LLAVE MÁGICA PARA LAS FOTOS
+    permission_classes = [AllowAny] 
     
 class BitacoraViewSet(viewsets.ModelViewSet):
     queryset = BitacoraActividad.objects.all()
     serializer_class = BitacoraSerializer
 
-# --- VISTAS DE AUTENTICACIÓN (LOGIN) ---
+# --- VISTAS DE AUTENTICACIÓN ---
 
 @api_view(['POST'])
 def login_operario(request):
     try:
-        # Blindaje contra espacios en blanco
         codigo_bruto = request.data.get('codigo', '')
         codigo = str(codigo_bruto).strip() 
         
@@ -142,7 +134,6 @@ def login_operario(request):
             return Response({"error": "Código es requerido"}, status=400)
 
         try:
-            # 1. SI EL USUARIO YA EXISTE
             user = User.objects.get(username__iexact=codigo)
             
             if not user.check_password(password):
@@ -159,7 +150,6 @@ def login_operario(request):
             }, status=200)
 
         except User.DoesNotExist:
-            # 2. SI ES UN USUARIO NUEVO
             if nombre and password_nueva:
                 user = User(
                     username=codigo,

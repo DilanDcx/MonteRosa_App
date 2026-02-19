@@ -23,7 +23,7 @@ final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  // 1. REVISAMOS LA MEMORIA ANTES DE ARRANCAR
+  // REVISION DE LA MEMORIA ANTES DE ARRANCAR
   SharedPreferences prefs = await SharedPreferences.getInstance();
   bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
   bool esAdmin = prefs.getBool('esAdmin') ?? false;
@@ -32,7 +32,6 @@ void main() async {
 
   Widget pantallaInicial = const LoginScreen();
 
-  // 2. SI HAY SESIÓN, SALTAMOS EL LOGIN
   if (isLoggedIn) {
     if (esAdmin) {
       pantallaInicial = AdminDashboard(nombreAdmin: nombre);
@@ -45,7 +44,7 @@ void main() async {
 }
 
 class MyApp extends StatelessWidget {
-  final Widget pantallaInicial; // Recibimos la pantalla que decidió el main
+  final Widget pantallaInicial;
   const MyApp({super.key, required this.pantallaInicial});
 
   @override
@@ -74,7 +73,7 @@ class MyApp extends StatelessWidget {
             elevatedButtonTheme: ElevatedButtonThemeData(style: ElevatedButton.styleFrom(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white)),
             floatingActionButtonTheme: const FloatingActionButtonThemeData(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white),
           ),
-          home: pantallaInicial, // Usamos la pantalla decidida
+          home: pantallaInicial,
         );
       },
     );
@@ -91,7 +90,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   late TabController _tabController;
   bool cargando = false;
   final _opCodigoController = TextEditingController();
-  final _opPassController = TextEditingController(); // <--- NUEVO: Contraseña Operario
+  final _opPassController = TextEditingController();
   final _adminUserController = TextEditingController();
   final _adminPassController = TextEditingController();
 
@@ -124,7 +123,6 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
     try {
       final response = await http.post(
         url, headers: {"Content-Type": "application/json"},
-        // Ahora enviamos Código y Contraseña
         body: json.encode({
           "codigo": _opCodigoController.text.trim(),
           "password": _opPassController.text.trim() 
@@ -145,7 +143,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         String apellido = data['usuario']['last_name'] ?? "";
         String nombreCompleto = "$nombre $apellido".trim();
 
-        await _guardarSesion(codigo, nombreCompleto, false); // Guardar Memoria
+        await _guardarSesion(codigo, nombreCompleto, false);
         _navegarAOrdenes(codigo, nombreCompleto); 
         
       } else {
@@ -201,7 +199,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
 
   Future<void> _actualizarNombreYPass(String codigo, String nombre, String apellido, String password) async {
     setState(() => cargando = true);
-    final url = Uri.parse('$baseUrl/api/login-operario/'); // Tu mismo endpoint lo manejará
+    final url = Uri.parse('$baseUrl/api/login-operario/');
     try {
       await http.post(
         url, headers: {"Content-Type": "application/json"}, 
@@ -209,11 +207,11 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
           "codigo": codigo, 
           "nombre": nombre, 
           "apellido": apellido,
-          "password_nueva": password // Enviamos la nueva contraseña para que Django la guarde
+          "password_nueva": password
         })
       );
       String nombreCompleto = "$nombre $apellido".trim();
-      await _guardarSesion(codigo, nombreCompleto, false); // Guardar Memoria
+      await _guardarSesion(codigo, nombreCompleto, false);
       _navegarAOrdenes(codigo, nombreCompleto);
     } catch (e) { print(e); } finally { setState(() => cargando = false); }
   }
@@ -237,7 +235,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
         String nombreAdmin = data['usuario']['first_name'] ?? "Admin";
         String adminUser = data['usuario']['username'] ?? "admin";
         
-        await _guardarSesion(adminUser, nombreAdmin, true); // Guardar Memoria
+        await _guardarSesion(adminUser, nombreAdmin, true);
         if (mounted) Navigator.pushReplacement(context, MaterialPageRoute(builder: (context) => AdminDashboard(nombreAdmin: nombreAdmin)));
       } else { _mostrarError("Error", "Credenciales incorrectas."); }
     } catch (e) {_mostrarError("Error", e.toString());} finally {if(mounted) setState(()=>cargando=false);}
@@ -266,7 +264,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
                   child: Container(decoration: BoxDecoration(color: esOscuro ? Colors.grey[800] : Colors.grey[200], borderRadius: BorderRadius.circular(25)), child: TabBar(controller: _tabController, indicatorSize: TabBarIndicatorSize.tab, indicator: BoxDecoration(color: colorIngenioOrange, borderRadius: BorderRadius.circular(25)), labelColor: Colors.white, unselectedLabelColor: Colors.grey, dividerColor: Colors.transparent, tabs: const [Tab(text: "Operario"), Tab(text: "Admin")]))
                 ),
                 SizedBox(
-                  height: 380, // Aumenté un poco para que quepan las contraseñas
+                  height: 380,
                   child: TabBarView(
                     controller: _tabController,
                     children: [
@@ -360,15 +358,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
       height: 35, 
       width: 35, 
       padding: const EdgeInsets.all(2), 
-      // LA MAGIA DE DISEÑO: Fondo blanco SOLO en modo claro
       decoration: BoxDecoration(
         color: esOscuro ? Colors.transparent : Colors.white,
-        borderRadius: BorderRadius.circular(4), // Bordes un poco redondeados para que se vea premium
+        borderRadius: BorderRadius.circular(4),
       ),
       child: Image.asset(
         'assets/logo.png', 
         fit: BoxFit.contain, 
-        // Como ya controlamos el fondo, podemos regresar la fábrica a su color naranja original
         errorBuilder: (c,e,s) => const Icon(Icons.factory, size: 25, color: Color(0xFFEF7D00))
       )
     ), 
@@ -388,16 +384,16 @@ class _AdminDashboardState extends State<AdminDashboard> {
     icon: const Icon(Icons.exit_to_app), 
     tooltip: "Cerrar Sesión",
     onPressed: () async {
-      // 1. Borramos la sesión de la memoria del celular
+      // Borramos la sesión de la memoria del celular
       SharedPreferences prefs = await SharedPreferences.getInstance();
       await prefs.clear(); 
       
-      // 2. Lo mandamos al Login sin posibilidad de regresar
+      // Lo mandamos al Login sin posibilidad de regresar
       if (context.mounted) {
         Navigator.pushAndRemoveUntil(
           context, 
           MaterialPageRoute(builder: (_) => const LoginScreen()), 
-          (route) => false // Esto destruye las pantallas anteriores
+          (route) => false
         );
       }
     }
@@ -406,7 +402,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ),
         body: cargando ? const Center(child: CircularProgressIndicator(color: colorIngenioOrange)) : TabBarView(children: [_listaAdmin(pendientes, esHistorial: false), _listaAdmin(completadas, esHistorial: true)]),
         
-        // BOTÓN WEB ADMIN: Abre el navegador en el panel de Django
         floatingActionButton: FloatingActionButton(
           backgroundColor: colorIngenioOrange, 
           child: const Icon(Icons.cloud_upload, color: Colors.white), 
@@ -454,9 +449,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
     if (p == '1') return Colors.red; if (p == '2') return Colors.orange; if (p == '3') return Colors.amber; if (p == '4') return Colors.green; return Colors.grey; 
   }
 }
-// ==========================
-// 3. PANTALLA CREAR ORDEN (INFO SAP)
-// ==========================
+// =========================
+// 3. PANTALLA CREAR ORDEN
+// =========================
 class CrearOrdenScreen extends StatelessWidget {
   const CrearOrdenScreen({super.key});
 
@@ -471,14 +466,14 @@ class CrearOrdenScreen extends StatelessWidget {
         iconTheme: IconThemeData(color: esOscuro ? colorIngenioOrange : Colors.white),
         actions: [
       IconButton(
-        icon: const Icon(Icons.exit_to_app, color: Colors.white), // El ícono de la puertita
+        icon: const Icon(Icons.exit_to_app, color: Colors.white),
         tooltip: "Cerrar Sesión",
         onPressed: () async {
-          // 1. Vaciamos la memoria para que la App lo olvide
+          // Vaciamos la memoria para que la App lo olvide
           SharedPreferences prefs = await SharedPreferences.getInstance();
           await prefs.clear();
           
-          // 2. Lo regresamos a la pantalla principal de Login
+          // Lo regresamos a la pantalla principal de Login
           if (context.mounted) {
             Navigator.pushAndRemoveUntil(
               context, 
@@ -572,7 +567,6 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
 
         if (mounted) {
           setState(() {
-            // NUEVA LÓGICA DE ESTADOS
             _pendientes = soloMias.where((o) => o['estado'] == 'PENDIENTE').toList();
             _historial = soloMias.where((o) => o['estado'] == 'FINALIZADA').toList();
 
@@ -686,7 +680,6 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
              letraAvatar = orden['prioridad']; // Lee el 1, 2, 3 o 4
           }
           
-          // NUEVA LÓGICA DE PRIORIDAD SAP
           Color colorAvatar = Colors.grey;
           if (orden['prioridad'] == '1') colorAvatar = Colors.red;
           if (orden['prioridad'] == '2') colorAvatar = Colors.orange;
@@ -926,7 +919,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                 ],
 
                 if (pendientes.isNotEmpty) ...[
-                  // ¡AQUÍ ESTÁ LA CORRECCIÓN DE SINTAXIS!
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 8), 
                     child: Row(
@@ -947,7 +939,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                   ),
                   ...terminadas.map((act) => _cardActividad(act, true, esOscuro, esAdmin)),
                 ],
-
                 if (pendientes.isEmpty && terminadas.isEmpty) Center(child: Padding(padding: const EdgeInsets.all(20), child: Text("No hay operaciones registradas", style: TextStyle(color: esOscuro ? Colors.grey : Colors.grey[600])))),
               ],
             ),
@@ -1002,7 +993,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   }
 }
 // =========================
-// 6. PANTALLA DE EJECUCIÓN (CON AUDITORÍA DE TIEMPOS)
+// 6. PANTALLA DE EJECUCIÓN
 // =========================
 
 class EjecucionActividadScreen extends StatefulWidget {
@@ -1030,7 +1021,6 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
   bool _enviandoFoto = false;
   bool _procesandoCierre = false; 
   
-  // --- NUEVA VARIABLE: Para guardar la hora a la que empezó realmente ---
   String? _horaInicioReal; 
   
   List<dynamic> _historialBitacora = [];
@@ -1179,12 +1169,12 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     final XFile? photo = await picker.pickImage(
       source: source, 
       imageQuality: 85,
-      maxWidth: 1200, // Un poco más grande para mejor detalle en auditoría
+      maxWidth: 1200, 
     );
     
     if (photo == null) return;
 
-    // Validación de integridad del archivo (Evita el error de 0 KB)
+    // Validación de integridad del archivo
     final bytes = await photo.readAsBytes();
     if (bytes.isEmpty) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(
@@ -1268,7 +1258,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       if (nombreFinal == "null" || nombreFinal.trim().isEmpty) { nombreFinal = _nombreManualController.text; }
       datos['nombre_ejecutor'] = nombreFinal;
       
-      // Guardamos la hora de inicio por primera vez
+      // Guardamos la hora de inicio
       String ahora = DateTime.now().toIso8601String();
       datos['fecha_inicio_real'] = ahora;
       _horaInicioReal = ahora;
@@ -1288,15 +1278,12 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     _timer?.cancel();
     setState(() => _procesandoCierre = true);
 
-    // Formateamos todos los tiempos
     String tiempoActivoStr = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
     String tiempoPausadoStr = _calcularTiempoPausas();
     String fechaFinReal = DateTime.now().toIso8601String();
-    
-    // Si hubo un fallo y no tenemos hora de inicio, usamos un respaldo para que no explote
+  
     String fechaInicioReal = _horaInicioReal ?? DateTime.now().toIso8601String();
 
-    // ESTE ES EL NUEVO PAQUETE DE DATOS EXACTO PARA DJANGO
     Map<String, dynamic> datos = {
       "fecha_inicio_real": fechaInicioReal,
       "fecha_fin_real": fechaFinReal,
@@ -1554,7 +1541,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
   }
 }
 // ============================
-// 7. PANTALLA DE EDITAR ORDEN (INFO SAP)
+// 7. PANTALLA DE EDITAR ORDEN
 // ============================
 class EditarOrdenScreen extends StatelessWidget {
   final Map<String, dynamic> orden;
