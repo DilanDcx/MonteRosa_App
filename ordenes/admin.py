@@ -1,12 +1,15 @@
 from django.contrib import admin
 from import_export import resources, fields
-from import_export.admin import ImportExportModelAdmin
+from import_export.admin import ImportMixin # <-- CAMBIO 1: Solo importamos el Mixin de Importar
 from import_export.widgets import ForeignKeyWidget
 from datetime import datetime, date
 from django.utils.html import format_html
 from django.contrib import messages
 from django.urls import path, reverse
 from django.shortcuts import redirect
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from django.http import HttpResponse
 from .models import OrdenTrabajo, Actividad, OrdenBorrador, OrdenPendiente, OrdenHistorial, BitacoraActividad, Evidencia
 from django.contrib.auth.models import User, Group 
 from django.contrib.auth.admin import UserAdmin
@@ -120,8 +123,9 @@ class EvidenciaInline(admin.StackedInline):
 
     ver_foto.short_description = "Vista Previa de la Imagen"
 
+# <-- CAMBIO 2: Usamos ImportMixin y admin.ModelAdmin para ocultar el botón Exportar
 @admin.register(OrdenBorrador)
-class OrdenBorradorAdmin(ImportExportModelAdmin):
+class OrdenBorradorAdmin(ImportMixin, admin.ModelAdmin):
     resource_class = ActividadResource
     
     list_display = (
@@ -258,11 +262,43 @@ class ActividadHistorialInline(admin.StackedInline):
     verbose_name = "Operación Finalizada"
     verbose_name_plural = "Operaciones (Actividades)"
     
-    readonly_fields = ('codigo_operacion', 'descripcion', 'nombre_ejecutor', 'fecha_inicio_real', 'fecha_fin_real', 'tiempo_real_acumulado', 'tiempo_pausas')
-    fields = ('codigo_operacion', 'descripcion', 'nombre_ejecutor', 'fecha_inicio_real', 'fecha_fin_real', 'tiempo_real_acumulado', 'tiempo_pausas')
+    readonly_fields = ('codigo_operacion', 'descripcion', 'nombre_ejecutor', 'fecha_inicio_real', 'fecha_fin_real', 'tiempo_legible', 'tiempo_pausas_legible')
+    fields = ('codigo_operacion', 'descripcion', 'nombre_ejecutor', 'fecha_inicio_real', 'fecha_fin_real', 'tiempo_legible', 'tiempo_pausas_legible')
     
+    def tiempo_legible(self, obj):
+        if not obj.tiempo_real_acumulado:
+            return "00:00:00"
+        try:
+            if hasattr(obj.tiempo_real_acumulado, 'total_seconds'):
+                ts = int(obj.tiempo_real_acumulado.total_seconds())
+            else:
+                ts = int(obj.tiempo_real_acumulado) // 1000000
+                
+            horas, rem = divmod(ts, 3600)
+            minutos, segundos = divmod(rem, 60)
+            return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+        except Exception:
+            return str(obj.tiempo_real_acumulado)
+    tiempo_legible.short_description = "Tiempo Activo Real"
+
+    def tiempo_pausas_legible(self, obj):
+        if not obj.tiempo_pausas:
+            return "00:00:00"
+        try:
+            if hasattr(obj.tiempo_pausas, 'total_seconds'):
+                ts = int(obj.tiempo_pausas.total_seconds())
+            else:
+                ts = int(obj.tiempo_pausas) // 1000000
+                
+            horas, rem = divmod(ts, 3600)
+            minutos, segundos = divmod(rem, 60)
+            return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+        except Exception:
+            return str(obj.tiempo_pausas)
+    tiempo_pausas_legible.short_description = "Tiempo Total en Pausa"
+
     def has_add_permission(self, request, obj): 
-        return False 
+        return False
 
 @admin.register(OrdenHistorial)
 class OrdenHistorialAdmin(admin.ModelAdmin):
@@ -271,6 +307,100 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
     list_filter = ('fin_programado',) 
     
     inlines = [ActividadHistorialInline, EvidenciaInline]
+
+    @admin.action(description="📥 Exportar datos (Excel .xlsx)")
+    def exportar_sap(self, request, queryset):
+        response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+        response['Content-Disposition'] = 'attachment; filename="Reporte_Cierre.xlsx"'
+        
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Cierre de Órdenes"
+
+        ws.sheet_view.showGridLines = False
+
+        header_fill = PatternFill(start_color="4F4F4F", end_color="4F4F4F", fill_type="solid")
+        header_font = Font(bold=True, color="FFFFFF")
+        center_alignment = Alignment(horizontal="center", vertical="center")
+        
+        borde_delgado = Border(
+            left=Side(style='thin', color='000000'), 
+            right=Side(style='thin', color='000000'), 
+            top=Side(style='thin', color='000000'), 
+            bottom=Side(style='thin', color='000000')
+        )
+
+        headers = [
+            'Orden', 'Operación', 'Txt.brv.oper.', 'Equipo', 
+            'Ubicación Téc.', 'Inicio Prog.', 'Fin Prog.',
+            'Ejecutor Real', 'Inicio Real', 'Fin Real', 
+            'Tiempo Activo (HH:MM:SS)', 'Tiempo en Pausa (HH:MM:SS)'
+        ]
+        ws.append(headers)
+
+        for cell in ws[1]:
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = center_alignment
+            cell.border = borde_delgado
+
+        def formatear_tiempo(valor):
+            if not valor: return "00:00:00"
+            try:
+                if hasattr(valor, 'total_seconds'):
+                    ts = int(valor.total_seconds())
+                elif str(valor).isdigit():
+                    ts = int(valor) // 1000000
+                else:
+                    return str(valor)
+                horas, rem = divmod(ts, 3600)
+                minutos, segundos = divmod(rem, 60)
+                return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
+            except Exception:
+                return str(valor)
+
+        for orden in queryset:
+            actividades = Actividad.objects.filter(orden=orden)
+            for act in actividades:
+                t_activo = formatear_tiempo(act.tiempo_real_acumulado)
+                t_pausa = formatear_tiempo(act.tiempo_pausas)
+
+                inicio_real = act.fecha_inicio_real.strftime('%d/%m/%Y %H:%M') if act.fecha_inicio_real else '-'
+                fin_real = act.fecha_fin_real.strftime('%d/%m/%Y %H:%M') if act.fecha_fin_real else '-'
+                inicio_prog = orden.inicio_programado.strftime('%d/%m/%Y') if orden.inicio_programado else '-'
+                fin_prog = orden.fin_programado.strftime('%d/%m/%Y') if orden.fin_programado else '-'
+
+                fila = [
+                    orden.numero_orden, act.codigo_operacion, act.descripcion,
+                    orden.equipo, orden.ubicacion, inicio_prog, fin_prog,
+                    act.nombre_ejecutor or '-', inicio_real, fin_real,
+                    t_activo, t_pausa
+                ]
+                ws.append(fila)
+
+        for col in ws.columns:
+            max_length = 0
+            column = col[0].column_letter
+            
+            for cell in col:
+                cell.border = borde_delgado
+                
+                if cell.column >= 6:
+                    cell.alignment = center_alignment
+                
+                try:
+                    if len(str(cell.value)) > max_length:
+                        max_length = len(str(cell.value))
+                except:
+                    pass
+                    
+            ajuste = (max_length + 2)
+            ws.column_dimensions[column].width = ajuste
+
+        wb.save(response)
+        return response
+
+    actions = ['exportar_sap']
 
     def get_readonly_fields(self, request, obj=None):
         return [f.name for f in self.model._meta.fields]
