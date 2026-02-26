@@ -11,9 +11,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 // ================================
 
 // Usar esta para el EMULADOR (Desarrollo en PC)
-// const String baseUrl = "http://10.0.2.2:8000";
+// const String baseUrl = "http://10.0.2.2";
 
-const String baseUrl = "http://10.0.2.2:8000"; 
+const String baseUrl = "http://10.0.2.2"; 
 
 const Color colorIngenioOrange = Color(0xFFEF7D00);
 

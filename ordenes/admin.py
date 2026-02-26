@@ -102,7 +102,7 @@ class ActividadInline(admin.TabularInline):
 class EvidenciaInline(admin.StackedInline): 
     model = Evidencia
     fk_name = 'orden'
-    extra = 0
+    extra = 1
     
     verbose_name = "Fotografía de Respaldo"
     verbose_name_plural = "📸 Panel de Evidencias Fotográficas" 
@@ -308,6 +308,12 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
     
     inlines = [ActividadHistorialInline, EvidenciaInline]
 
+    @admin.action(description="🗑️ Eliminar órdenes seleccionadas")
+    def eliminar_ordenes_seleccionadas(self, request, queryset): 
+        cantidad = queryset.count()
+        queryset.delete()
+        self.message_user(request, f"Se eliminaron {cantidad} órdenes correctamente.") 
+
     @admin.action(description="📥 Exportar datos (Excel .xlsx)")
     def exportar_sap(self, request, queryset):
         response = HttpResponse(content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -400,7 +406,7 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
         wb.save(response)
         return response
 
-    actions = ['exportar_sap']
+    actions = ['exportar_sap', 'eliminar_ordenes_seleccionadas']
 
     def get_readonly_fields(self, request, obj=None):
         return [f.name for f in self.model._meta.fields]

@@ -58,12 +58,24 @@ TEMPLATES = [
 WSGI_APPLICATION = 'backend_central.wsgi.application'
 
 #BASE DE DATOS
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+if os.environ.get('USA_DOCKER') == 'True':
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'monterosa_db'),
+            'USER': os.environ.get('POSTGRES_USER', 'monterosa_user'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'superpassword123'),
+            'HOST': os.environ.get('POSTGRES_HOST', 'db'), # 'db' será el nombre del contenedor
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
 
 # CONTRASENAS
 AUTH_PASSWORD_VALIDATORS = [
@@ -132,3 +144,9 @@ REST_FRAMEWORK = {
         'rest_framework.permissions.AllowAny', # Temporalmente abierto para probar
     ]
 }
+
+STATIC_URL = '/static/'
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
