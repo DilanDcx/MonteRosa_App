@@ -25,3 +25,7 @@ Thumbs.db
 recursoorden.xlsx
 media/
 staticfiles/
+
+app_backend_sano.tar
+app_nginx.tar
+app_postgres.tar

@@ -5,15 +5,15 @@ import 'dart:async';
 import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:hive_flutter/hive_flutter.dart';
+import 'offline.dart';
+import 'dart:io';
 
 // ================================
 // 1. CONFIGURACIÓN GLOBAL Y LOGIN
 // ================================
 
-// Usar esta para el EMULADOR (Desarrollo en PC)
-// const String baseUrl = "http://10.0.2.2";
-
-const String baseUrl = "http://10.0.2.2"; 
+const String baseUrl = "http://10.137.8.37:8080"; 
 
 const Color colorIngenioOrange = Color(0xFFEF7D00);
 
@@ -22,7 +22,10 @@ final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
+  await Hive.initFlutter();
+  await Hive.openBox('pendientesBox');
+
   // REVISION DE LA MEMORIA ANTES DE ARRANCAR
   SharedPreferences prefs = await SharedPreferences.getInstance();
   bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
@@ -30,8 +33,13 @@ void main() async {
   String codigo = prefs.getString('codigo') ?? '';
   String nombre = prefs.getString('nombre') ?? '';
 
+  // LEER MODO OSCURO DE MEMORIA
+  bool esOscuroGuardado = prefs.getBool('modoOscuro') ?? false;
+  themeNotifier.value = esOscuroGuardado ? ThemeMode.dark : ThemeMode.light;
+
   Widget pantallaInicial = const LoginScreen();
 
+  // VALIDACIÓN DE SESIÓN 
   if (isLoggedIn) {
     if (esAdmin) {
       pantallaInicial = AdminDashboard(nombreAdmin: nombre);
@@ -525,6 +533,7 @@ class CrearOrdenScreen extends StatelessWidget {
 // ========================
 // 4. PANTALLA MIS ÓRDENES 
 // ========================
+
 class OrdenesScreen extends StatefulWidget {
   final String codigoTrabajador;
   final String nombreTrabajador; 
@@ -544,6 +553,11 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   List<dynamic> _historial = [];
   bool cargando = true;
 
+  // ==========================================
+  // EL SILENCIADOR: Variable estática para que solo avise una vez por sesión
+  // ==========================================
+  static bool _alertaOfflineMostrada = false;
+
   @override
   void initState() {
     super.initState();
@@ -551,36 +565,128 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   }
 
   Future<void> fetchOrdenes() async {
+    // 1. ANTES DE PEDIR ÓRDENES NUEVAS, INTENTAMOS SUBIR LO PENDIENTE
+    await OfflineService.sincronizarPendientes(); 
+
     final url = Uri.parse('$baseUrl/api/ordenes/?trabajador=${widget.codigoTrabajador}');
     
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
-        List<dynamic> todas = json.decode(response.body);
-        
-        // Filtro de seguridad en el cliente para el operario logueado
-        List<dynamic> soloMias = todas.where((o) {
-          String assignedWorker = (o['codigo_trabajador'] ?? "").toString().trim();
-          String myCode = widget.codigoTrabajador.trim();
-          return assignedWorker == myCode;
-        }).toList();
+        // 🌐 ONLINE: Guardamos una copia exacta en el celular
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        await prefs.setString('cache_ordenes_${widget.codigoTrabajador}', response.body);
 
-        if (mounted) {
-          setState(() {
-            _pendientes = soloMias.where((o) => o['estado'] == 'PENDIENTE').toList();
-            _historial = soloMias.where((o) => o['estado'] == 'FINALIZADA').toList();
-
-            _pendientes.sort((a, b) => b['id'].compareTo(a['id']));
-            _historial.sort((a, b) => b['id'].compareTo(a['id']));
-            
-            cargando = false;
-          });
-        }
+        _procesarYMostrarOrdenes(response.body);
       } else {
         if(mounted) _mostrarAlertaError("Error Servidor", response.body);
       }
     } catch (e) {
-      if(mounted) _mostrarAlertaError("Error Conexión", e.toString());
+      // 📡 OFFLINE: Se cayó la red o estamos en modo avión
+      if (mounted) {
+        setState(() => cargando = false);
+        
+        // Solo mostramos el cartelito UNA vez por sesión
+        if (!_alertaOfflineMostrada) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Modo Offline. Los cambios se sincronizarán al recuperar señal."), 
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            )
+          );
+          _alertaOfflineMostrada = true; 
+        }
+
+        // Recuperamos la última "foto" que guardamos
+        SharedPreferences prefs = await SharedPreferences.getInstance();
+        String? cache = prefs.getString('cache_ordenes_${widget.codigoTrabajador}');
+        if (cache != null) {
+          _procesarYMostrarOrdenes(cache);
+        } else {
+          // Si no hay caché y no hay internet
+          setState(() {
+            _pendientes = [];
+            _historial = [];
+          });
+        }
+      }
+    }
+  }
+
+  // ==========================================
+  // BOTÓN DE RECARGA MANUAL CON DETECCIÓN DE RED
+  // ==========================================
+  Future<void> _botonRecargarManual() async {
+    bool conectado = await OfflineService.tieneInternet();
+
+    if (conectado) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Actualizando..."), backgroundColor: Colors.green, duration: Duration(seconds: 2))
+        );
+      }
+      setState(() => cargando = true);
+      await fetchOrdenes();
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text("Sin conexión. Intenta más tarde."), backgroundColor: Colors.redAccent, duration: Duration(seconds: 2))
+        );
+      }
+    }
+  }
+
+  // ==========================================
+  // MAGIA VISUAL: Ordena las listas leyendo la bóveda
+  // ==========================================
+  void _procesarYMostrarOrdenes(String jsonBody) {
+    List<dynamic> todas = json.decode(jsonBody);
+    
+    List<dynamic> soloMias = todas.where((o) {
+      String assignedWorker = (o['codigo_trabajador'] ?? "").toString().trim();
+      return assignedWorker == widget.codigoTrabajador.trim();
+    }).toList();
+
+    // Revisamos nuestra bóveda offline para ver si el operario cerró alguna orden
+    var box = Hive.box(OfflineService.boxName);
+    List<String> ordenesFinalizadasOffline = [];
+    
+    for (var key in box.keys) {
+      var peticion = box.get(key);
+      String peticionUrl = peticion['url'].toString();
+      
+      // Si la bóveda tiene un POST de finalización, extraemos el ID de la orden
+      if (peticionUrl.contains('/api/ordenes/') && peticionUrl.contains('/finalizar/')) {
+        RegExp regExp = RegExp(r'/ordenes/(\d+)/finalizar');
+        var match = regExp.firstMatch(peticionUrl);
+        if (match != null) {
+          ordenesFinalizadasOffline.add(match.group(1)!);
+        }
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        // Filtramos las pendientes: excluimos las que el operario ya cerró offline
+        _pendientes = soloMias.where((o) => 
+          o['estado'] == 'PENDIENTE' && !ordenesFinalizadasOffline.contains(o['id'].toString())
+        ).toList();
+
+        // Encontramos esas órdenes cerradas offline para moverlas visualmente
+        var movidasAlHistorial = soloMias.where((o) => 
+          o['estado'] == 'PENDIENTE' && ordenesFinalizadasOffline.contains(o['id'].toString())
+        ).toList();
+
+        // Armamos el historial combinando las que ya sabíamos + las recién cerradas offline
+        _historial = soloMias.where((o) => o['estado'] == 'FINALIZADA').toList();
+        _historial.addAll(movidasAlHistorial);
+
+        _pendientes.sort((a, b) => b['id'].compareTo(a['id']));
+        _historial.sort((a, b) => b['id'].compareTo(a['id']));
+        
+        cargando = false;
+      });
     }
   }
 
@@ -618,6 +724,13 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
             ],
           ),
           actions: [
+            // NUEVO BOTÓN DE RECARGA MANUAL
+            IconButton(
+              icon: const Icon(Icons.refresh),
+              tooltip: "Actualizar Órdenes",
+              onPressed: _botonRecargarManual,
+            ),
+            // BOTÓN ORIGINAL DE SALIR
             IconButton(
               icon: const Icon(Icons.exit_to_app),
               tooltip: "Cerrar Sesión",
@@ -677,7 +790,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
           
           String letraAvatar = "?";
           if (orden['prioridad'] != null && orden['prioridad'].toString().isNotEmpty) {
-             letraAvatar = orden['prioridad']; // Lee el 1, 2, 3 o 4
+             letraAvatar = orden['prioridad']; 
           }
           
           Color colorAvatar = Colors.grey;
@@ -724,6 +837,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
 // ====================
 // 5. DETALLE DE ORDEN
 // ====================
+
 class DetalleOrdenScreen extends StatefulWidget {
   final Map<String, dynamic> orden;
   final String nombreTrabajador;
@@ -744,13 +858,72 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
   Future<void> _recargarOrden() async {
     final url = Uri.parse('$baseUrl/api/ordenes/${widget.orden['id']}/');
     try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) { if (mounted) setState(() => ordenActual = json.decode(response.body)); }
-    } catch (e) { /* */ }
+      final response = await http.get(url).timeout(const Duration(seconds: 4));
+      if (response.statusCode == 200) { 
+        if (mounted) setState(() => ordenActual = json.decode(response.body)); 
+      }
+    } catch (e) { 
+      // 📡 MODO OFFLINE SILENCIOSO: Sin alertas rojas, solo lo ignoramos.
+    } finally {
+      // Siempre ejecutamos esto para actualizar la vista con datos de la bóveda
+      _aplicarCambiosOfflineLocales();
+    }
+  }
+
+  void _aplicarCambiosOfflineLocales() {
+    var box = Hive.box(OfflineService.boxName);
+    List<dynamic> acts = List.from(ordenActual['actividades'] ?? []);
+    
+    for (var key in box.keys) {
+      var peticion = box.get(key);
+      bool esFoto = peticion['es_foto'] == true;
+
+      if (esFoto) {
+        // MAGIA FOTOGRÁFICA: Inyectar las fotos locales de la bóveda a la vista
+        Map<String, String> fields = Map<String, String>.from(peticion['fields'] ?? {});
+        if (fields['orden'] == ordenActual['id'].toString()) {
+          int actIdOffline = int.parse(fields['actividad']!);
+          for (var i = 0; i < acts.length; i++) {
+            if (acts[i]['id'] == actIdOffline) {
+              acts[i]['evidencias'] ??= [];
+              // Evitamos duplicados visuales
+              bool yaExiste = acts[i]['evidencias'].any((e) => e['foto'] == peticion['path']);
+              if (!yaExiste) {
+                acts[i]['evidencias'].add({
+                  'foto': peticion['path'],
+                  'tipo': fields['tipo'],
+                  'es_local': true
+                });
+              }
+            }
+          }
+        }
+      } else {
+        // Inyectar el estado de finalización de actividades
+        String peticionUrl = peticion['url'].toString();
+        if (peticionUrl.contains('/api/actividades/') && peticionUrl.contains('/finalizar/')) {
+          RegExp regExp = RegExp(r'/actividades/(\d+)/finalizar');
+          var match = regExp.firstMatch(peticionUrl);
+          if (match != null) {
+            int actIdOffline = int.parse(match.group(1)!);
+            for (var i = 0; i < acts.length; i++) {
+              if (acts[i]['id'] == actIdOffline) {
+                acts[i]['finished'] = true;
+              }
+            }
+          }
+        }
+      }
+    }
+    if (mounted) setState(() { ordenActual['actividades'] = acts; });
   }
 
   // --- VISOR DE IMÁGENES A PANTALLA COMPLETA ---
-  void _mostrarImagenCompleta(BuildContext context, String url) {
+  void _mostrarImagenCompleta(BuildContext context, String url, bool esLocal) {
+    Widget imagenCompleta = esLocal
+        ? Image.file(File(url), fit: BoxFit.contain)
+        : Image.network(url, fit: BoxFit.contain);
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -763,7 +936,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
               panEnabled: true,
               minScale: 0.5,
               maxScale: 4,
-              child: Image.network(url, fit: BoxFit.contain),
+              child: imagenCompleta,
             ),
             Positioned(
               top: 0, right: 0,
@@ -785,7 +958,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
       builder: (context) => AlertDialog(
         backgroundColor: esOscuro ? Colors.grey[900] : Colors.white,
         title: Text("¿Finalizar Orden?", style: TextStyle(color: esOscuro ? const Color(0xFFEF7D00) : Colors.black)),
-        content: Text("La orden pasará al historial inmediatamente.", style: TextStyle(color: esOscuro ? Colors.white : Colors.black87)),
+        content: Text("La orden pasará al historial o se guardará localmente si no hay red.", style: TextStyle(color: esOscuro ? Colors.white : Colors.black87)),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text("Cancelar", style: TextStyle(color: Colors.grey))), 
           TextButton(onPressed: () => Navigator.pop(context, true), child: const Text("SÍ, FINALIZAR", style: TextStyle(color: Colors.red)))
@@ -795,28 +968,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     if (confirmar != true) return;
 
     setState(() => _enviando = true);
-    final url = Uri.parse('$baseUrl/api/ordenes/${ordenActual['id']}/finalizar/');
 
-    try {
-      final response = await http.post(url, headers: {"Content-Type": "application/json"});
-      if (response.statusCode == 200) {
-        if (mounted) { 
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("¡Orden cerrada con éxito!"), backgroundColor: Colors.green)); 
-          Navigator.pop(context); 
-        }
-      } else { 
-        if (mounted) _mostrarError("Error Servidor", response.body); 
-      }
-    } catch (e) { 
-      if (mounted) _mostrarError("Error Conexión", e.toString()); 
-    } finally { 
-      if (mounted) setState(() => _enviando = false); 
+    await OfflineService.peticionSegura(
+      url: '$baseUrl/api/ordenes/${ordenActual['id']}/finalizar/',
+      metodo: 'POST',
+      body: {} 
+    );
+
+    if (mounted) { 
+      setState(() => _enviando = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("¡Orden procesada! (Guardada en caché o servidor)"), 
+          backgroundColor: Colors.green
+        )
+      ); 
+      Navigator.pop(context); 
     }
-  }
-
-  void _mostrarError(String t, String m) {
-    bool esOscuro = Theme.of(context).brightness == Brightness.dark;
-    showDialog(context: context, builder: (ctx)=>AlertDialog(backgroundColor: esOscuro ? Colors.grey[900] : Colors.white, title:Text(t, style:const TextStyle(color:Colors.red)), content:Text(m, style: TextStyle(color: esOscuro ? Colors.white : Colors.black)), actions:[TextButton(onPressed:()=>Navigator.pop(ctx), child:const Text("OK"))]));
   }
 
   String _calcularTiempoPausas(List<dynamic> bitacora) {
@@ -897,15 +1065,23 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       itemBuilder: (context, index) {
                         String urlFoto = evidenciasGlobales[index]['foto'] ?? "";
                         String tipoFoto = evidenciasGlobales[index]['tipo'] ?? "FOTO";
-                        if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
+                        bool esLocal = evidenciasGlobales[index]['es_local'] == true;
+
+                        Widget imagenWidget;
+                        if (esLocal) {
+                          imagenWidget = Image.file(File(urlFoto), width: 75, height: 75, fit: BoxFit.cover);
+                        } else {
+                          if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
+                          imagenWidget = Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)));
+                        }
                         
                         return Padding(
                           padding: const EdgeInsets.only(right: 10),
                           child: GestureDetector(
-                            onTap: () => _mostrarImagenCompleta(context, urlFoto),
+                            onTap: () => _mostrarImagenCompleta(context, urlFoto, esLocal),
                             child: Column(
                               children: [
-                                ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)))),
+                                ClipRRect(borderRadius: BorderRadius.circular(8), child: imagenWidget),
                                 const SizedBox(height: 4),
                                 Text(tipoFoto, style: TextStyle(fontSize: 10, color: esOscuro ? Colors.grey[400] : Colors.black54, fontWeight: FontWeight.bold))
                               ],
@@ -984,7 +1160,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
           ), 
           child: Text(esAdmin ? "VER" : "ABRIR"), 
           onPressed: () { 
-             // Enlaza la pantalla de la Actividad
              Navigator.push(context, MaterialPageRoute(builder: (context) => EjecucionActividadScreen(actividad: act, nombreTrabajador: widget.nombreTrabajador, esAdmin: esAdmin))).then((_) => _recargarOrden()); 
           }
         ),
@@ -1035,8 +1210,14 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     _procesarDatosIniciales();
   }
 
-  // --- VISOR DE IMÁGENES A PANTALLA COMPLETA ---
-  void _mostrarImagenCompleta(BuildContext context, String url) {
+  // ==========================================
+  // VISOR DE IMÁGENES (Soporta red y local)
+  // ==========================================
+  void _mostrarImagenCompleta(BuildContext context, String url, bool esLocal) {
+    Widget imagenCompleta = esLocal
+        ? Image.file(File(url), fit: BoxFit.contain)
+        : Image.network(url, fit: BoxFit.contain);
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
@@ -1049,7 +1230,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
               panEnabled: true,
               minScale: 0.5,
               maxScale: 4,
-              child: Image.network(url, fit: BoxFit.contain),
+              child: imagenCompleta,
             ),
             Positioned(
               top: 0, right: 0,
@@ -1071,7 +1252,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       if (response.statusCode == 200) { 
          if (mounted) setState(() { actividadData = json.decode(response.body); _procesarDatosIniciales(); });
       }
-    } catch (e) { /* */ }
+    } catch (e) { /* En modo offline mantenemos los datos que ya tenemos */ }
   }
 
   void _procesarDatosIniciales() {
@@ -1079,13 +1260,11 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       _historialBitacora = List.from(actividadData['bitacora']);
       _historialBitacora.sort((a, b) => (a['fecha_hora']??"").compareTo(b['fecha_hora']??""));
       
-      // Rescatamos la hora de inicio si ya había arrancado antes
       if (_historialBitacora.isNotEmpty && _horaInicioReal == null) {
          _horaInicioReal = _historialBitacora.first['fecha_hora'];
       }
     }
     
-    // También rescatamos de los datos de Django si los trae
     if (actividadData['fecha_inicio_real'] != null) {
       _horaInicioReal = actividadData['fecha_inicio_real'];
     }
@@ -1137,7 +1316,6 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     });
   }
 
-  // --- NUEVA FUNCIÓN: CALCULADORA DE TIEMPO EN PAUSA ---
   String _calcularTiempoPausas() {
     if (_historialBitacora.isEmpty) return "00:00:00";
     Duration pausas = Duration.zero;
@@ -1157,13 +1335,15 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
         inicioPausa = null;
       }
     }
-    // Si la operación estaba pausada cuando le dio a Finalizar
     if (inicioPausa != null) pausas += DateTime.now().difference(inicioPausa);
 
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     return "${twoDigits(pausas.inHours)}:${twoDigits(pausas.inMinutes.remainder(60))}:${twoDigits(pausas.inSeconds.remainder(60))}";
   }
 
+  // ==========================================
+  // MAGIA OFFLINE: GUARDADO DE FOTOS Y VISTA PREVIA
+  // ==========================================
   Future<void> _tomarYSubirFoto(String tipo, ImageSource source) async {
     final picker = ImagePicker();
     final XFile? photo = await picker.pickImage(
@@ -1174,46 +1354,54 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     
     if (photo == null) return;
 
-    // Validación de integridad del archivo
     final bytes = await photo.readAsBytes();
     if (bytes.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("❌ Error: Archivo de imagen vacío. Reintenta.")),
-      );
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("❌ Archivo vacío.")));
       return;
     }
 
     setState(() => _enviandoFoto = true);
-    try {
-      var request = http.MultipartRequest('POST', Uri.parse('$baseUrl/api/evidencias/'));
-      request.fields['actividad'] = actividadData['id'].toString(); 
-      if (actividadData['orden'] != null) request.fields['orden'] = actividadData['orden'].toString();
-      request.fields['tipo'] = tipo; 
-      request.fields['descripcion'] = "Subido por ${widget.nombreTrabajador}";
-      request.files.add(await http.MultipartFile.fromPath('foto', photo.path));
+    
+    Map<String, String> camposTexto = {
+      'actividad': actividadData['id'].toString(),
+      'tipo': tipo,
+      'descripcion': "Subido por ${widget.nombreTrabajador}"
+    };
+    if (actividadData['orden'] != null) {
+      camposTexto['orden'] = actividadData['orden'].toString();
+    }
 
-      var response = await request.send();
-      if (response.statusCode == 201) {
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("✅ Evidencia guardada"), backgroundColor: Colors.green)
-        );
+    bool exitoOnline = await OfflineService.subirFotoSegura(
+      url: '$baseUrl/api/evidencias/',
+      imagePath: photo.path,
+      fields: camposTexto,
+    );
+
+    if (mounted) {
+      setState(() {
+        _enviandoFoto = false;
+        // INYECTAMOS LA FOTO LOCALMENTE PARA QUE SE VEA AUNQUE NO HAYA RED
+        actividadData['evidencias'] ??= [];
+        actividadData['evidencias'].add({
+          'foto': photo.path,
+          'tipo': tipo,
+          'es_local': true // <--- Bandera clave
+        });
+      });
+
+      if (exitoOnline) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Evidencia enviada"), backgroundColor: Colors.green));
         _recargarActividad(); 
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("💾 Guardada offline. Se subirá con la red."), backgroundColor: Colors.orange));
       }
-    } catch (e) { 
-        if (mounted) ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error de conexión: $e"), backgroundColor: Colors.red)
-        );
-    } finally { 
-        if (mounted) setState(() => _enviandoFoto = false); 
     }
   }
 
   void _mostrarOpcionesImagen(String tipo) {
     showModalBottomSheet(
       context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (context) {
         return SafeArea(
           child: Wrap(
@@ -1221,18 +1409,12 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
               ListTile(
                 leading: const Icon(Icons.camera_alt, color: Color(0xFFEF7D00)),
                 title: const Text('Tomar Foto con Cámara'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _tomarYSubirFoto(tipo, ImageSource.camera);
-                },
+                onTap: () { Navigator.pop(context); _tomarYSubirFoto(tipo, ImageSource.camera); },
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library, color: Color(0xFFEF7D00)),
                 title: const Text('Seleccionar de Galería'),
-                onTap: () {
-                  Navigator.pop(context);
-                  _tomarYSubirFoto(tipo, ImageSource.gallery);
-                },
+                onTap: () { Navigator.pop(context); _tomarYSubirFoto(tipo, ImageSource.gallery); },
               ),
             ],
           ),
@@ -1242,13 +1424,24 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
   }
 
   Future<void> _registrarEventoBitacora(String tipoEvento) async {
-    final url = Uri.parse('$baseUrl/api/bitacora/');
-    try {
-      final response = await http.post(url, headers: {"Content-Type": "application/json"}, body: json.encode({'actividad': actividadData['id'], 'evento': tipoEvento}));
-      if (response.statusCode == 201) { setState(() { _historialBitacora.add(json.decode(response.body)); }); }
-    } catch (e) { print(e); }
+    await OfflineService.peticionSegura(
+      url: '$baseUrl/api/bitacora/',
+      metodo: 'POST',
+      body: {'actividad': actividadData['id'], 'evento': tipoEvento}
+    );
+
+    setState(() { 
+      _historialBitacora.add({
+        'actividad': actividadData['id'],
+        'evento': tipoEvento,
+        'fecha_hora': DateTime.now().toIso8601String()
+      }); 
+    });
   }
 
+  // ==========================================
+  // MAGIA OFFLINE: LIMPIEZA Y GUARDADO DE FECHA INICIO
+  // ==========================================
   Future<void> _actualizarActividadEnDjango(bool arrancando) async {
     String tiempoStr = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
     Map<String, dynamic> datos = {'en_progreso': arrancando, 'tiempo_real_acumulado': tiempoStr};
@@ -1258,31 +1451,46 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       if (nombreFinal == "null" || nombreFinal.trim().isEmpty) { nombreFinal = _nombreManualController.text; }
       datos['nombre_ejecutor'] = nombreFinal;
       
-      // Guardamos la hora de inicio
-      String ahora = DateTime.now().toIso8601String();
+      // 1. Limpiamos la fecha de milisegundos para Django
+      String ahora = DateTime.now().toIso8601String().split('.')[0];
       datos['fecha_inicio_real'] = ahora;
       _horaInicioReal = ahora;
+      
+      // 2. Guardamos en la memoria local para evitar amnesia
+      actividadData['fecha_inicio_real'] = ahora; 
+      actividadData['nombre_ejecutor'] = nombreFinal;
     }
 
-    final url = Uri.parse('$baseUrl/api/actividades/${actividadData['id']}/');
-    try { 
-      await http.patch(url, headers: {"Content-Type": "application/json"}, body: json.encode(datos)); 
-      actividadData['en_progreso'] = arrancando;
-      actividadData['tiempo_real_acumulado'] = tiempoStr; 
-    } catch (e) { print(e); }
+    await OfflineService.peticionSegura(
+      url: '$baseUrl/api/actividades/${actividadData['id']}/',
+      metodo: 'PATCH',
+      body: datos
+    ); 
 
-    setState(() { _enProgreso = arrancando; if (arrancando) _iniciarTimerVisual(); else _timer?.cancel(); });
+    actividadData['en_progreso'] = arrancando;
+    actividadData['tiempo_real_acumulado'] = tiempoStr; 
+
+    setState(() { 
+      _enProgreso = arrancando; 
+      if (arrancando) _iniciarTimerVisual(); else _timer?.cancel(); 
+    });
   }
 
+  // ==========================================
+  // MAGIA OFFLINE: LIMPIEZA Y GUARDADO DE FECHA FIN
+  // ==========================================
   Future<void> _finalizarTareaEnDjango() async {
     _timer?.cancel();
     setState(() => _procesandoCierre = true);
 
     String tiempoActivoStr = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
     String tiempoPausadoStr = _calcularTiempoPausas();
-    String fechaFinReal = DateTime.now().toIso8601String();
-  
-    String fechaInicioReal = _horaInicioReal ?? DateTime.now().toIso8601String();
+    
+    // 1. Limpiamos las fechas de milisegundos
+    String fechaFinReal = DateTime.now().toIso8601String().split('.')[0]; 
+    String fechaInicioReal = _horaInicioReal != null 
+        ? _horaInicioReal!.split('.')[0] 
+        : DateTime.now().toIso8601String().split('.')[0];
 
     Map<String, dynamic> datos = {
       "fecha_inicio_real": fechaInicioReal,
@@ -1296,32 +1504,21 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       datos['notas_operario'] = _notasController.text;
     }
 
-    final url = Uri.parse('$baseUrl/api/actividades/${actividadData['id']}/finalizar/');
+    await OfflineService.peticionSegura(
+      url: '$baseUrl/api/actividades/${actividadData['id']}/finalizar/',
+      metodo: 'POST',
+      body: datos
+    );
     
-    try { 
-      final response = await http.post(url, headers: {"Content-Type": "application/json"}, body: json.encode(datos));
+    // 2. Guardamos en la memoria local
+    actividadData['fecha_fin_real'] = fechaFinReal;
       
-      if (response.statusCode == 200 || response.statusCode == 204) {
-         setState(() { _finalizado = true; _enProgreso = false; _procesandoCierre = false; });
-         if (mounted) Navigator.pop(context); 
-      } else {
-         setState(() => _procesandoCierre = false);
-         if (mounted) {
-            showDialog(
-              context: context,
-              builder: (c) => AlertDialog(
-                title: const Text("Error Backend Django", style: TextStyle(color: Colors.red)),
-                content: Text("El servidor no guardó los datos.\n\nCódigo: ${response.statusCode}\nRespuesta:\n${response.body}"),
-                actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("ENTENDIDO"))]
-              )
-            );
-         }
-      }
-    } catch (e) { 
-      setState(() => _procesandoCierre = false);
-      if (mounted) {
-         showDialog(context: context, builder: (c) => AlertDialog(title: const Text("Error de Conexión", style: TextStyle(color: Colors.red)), content: Text(e.toString()), actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text("OK"))]));
-      }
+    setState(() { _finalizado = true; _enProgreso = false; _procesandoCierre = false; });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Tarea Finalizada (Guardada local o en servidor)"), backgroundColor: Colors.green)
+      );
+      Navigator.pop(context); 
     }
   }
 
@@ -1410,14 +1607,25 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
                               itemBuilder: (context, index) {
                                 String urlFoto = evidencias[index]['foto'] ?? "";
                                 String tipoFoto = evidencias[index]['tipo'] ?? "FOTO";
-                                if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
+                                
+                                // Revisamos si la foto se acaba de tomar en modo offline
+                                bool esLocal = evidencias[index]['es_local'] == true;
+
+                                Widget imagenWidget;
+                                if (esLocal) {
+                                  imagenWidget = Image.file(File(urlFoto), width: 75, height: 75, fit: BoxFit.cover);
+                                } else {
+                                  if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
+                                  imagenWidget = Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)));
+                                }
+
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 10),
                                   child: GestureDetector(
-                                    onTap: () => _mostrarImagenCompleta(context, urlFoto), 
+                                    onTap: () => _mostrarImagenCompleta(context, urlFoto, esLocal), 
                                     child: Column(
                                       children: [
-                                        ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)))),
+                                        ClipRRect(borderRadius: BorderRadius.circular(8), child: imagenWidget),
                                         const SizedBox(height: 4),
                                         Text(tipoFoto, style: TextStyle(fontSize: 10, color: esOscuro ? Colors.grey[400] : Colors.black54, fontWeight: FontWeight.bold))
                                       ],
@@ -1529,7 +1737,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFEF7D00))) 
            : Icon(icono, size: 25), 
          color: esOscuro ? Colors.white70 : Colors.black87, 
-         onPressed: _enviandoFoto ? null : () => _mostrarOpcionesImagen(tipo), // <--- CAMBIO AQUÍ
+         onPressed: _enviandoFoto ? null : () => _mostrarOpcionesImagen(tipo), 
          style: IconButton.styleFrom(
            backgroundColor: esOscuro ? Colors.grey[800] : Colors.grey[300], 
            padding: const EdgeInsets.all(10)

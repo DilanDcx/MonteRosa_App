@@ -15,6 +15,7 @@ services:
   # CONTENEDOR 2: Tu Código (Django + Gunicorn)
   web:
     build: .
+    platform: linux/amd64
     restart: always
     # 1. Empaqueta el diseño, 2. Crea las tablas en Postgres, 3. Enciende Gunicorn
     command: sh -c "python manage.py collectstatic --noinput && python manage.py migrate && gunicorn backend_central.wsgi:application --bind 0.0.0.0:8000 --workers 3"
