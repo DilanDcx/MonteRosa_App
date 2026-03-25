@@ -1,0 +1,28 @@
+# Bloqueo de Entornos Virtuales
+venv/
+env/
+.venv/
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+
+# Bloqueo de Caché y Git
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+
+# Bloqueo de bases de datos locales y archivos temporales
+db.sqlite3
+media/
+staticfiles/
+.env
+
+# Bloquear respaldos pesados
+*.tar
+*.gz
+*.zip
+app_im/

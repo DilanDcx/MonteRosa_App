@@ -79,10 +79,12 @@ else:
 
 # CONTRASENAS
 AUTH_PASSWORD_VALIDATORS = [
-    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',},
-    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',},
+    {
+        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
+        'OPTIONS': {
+            'min_length': 8, # Solo exigimos que tenga 8 caracteres, sin importar cuáles sean
+        }
+    },
 ]
 
 # 7. IDIOMA Y ZONA
@@ -105,6 +107,8 @@ JAZZMIN_SETTINGS = {
     "welcome_sign": "Bienvenido al Panel de Control",
     "copyright": "Ingenio Monte Rosa S.A.",
     "search_model": ["ordenes.OrdenTrabajo", "auth.User"],
+
+    "hide_models": ["auth.Group"],
 
     "site_logo": "img/logo.png",
     "site_logo_classes": "img-circle bg-white p-1",

@@ -6,10 +6,14 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 import 'offline.dart';
 import 'dart:io';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
-// ================================
+
+
+// ================================   
 // 1. CONFIGURACIÓN GLOBAL Y LOGIN
 // ================================
 
@@ -18,7 +22,8 @@ const String baseUrl = "http://10.137.8.37:8080";
 const Color colorIngenioOrange = Color(0xFFEF7D00);
 
 // VARIABLE GLOBAL PARA EL MODO OSCURO
-final ValueNotifier<ThemeMode> themeNotifier = ValueNotifier(ThemeMode.light);
+
+final ValueNotifier<ThemeMode> globalThemeNotifier = ValueNotifier(ThemeMode.light);
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -33,9 +38,10 @@ void main() async {
   String codigo = prefs.getString('codigo') ?? '';
   String nombre = prefs.getString('nombre') ?? '';
 
-  // LEER MODO OSCURO DE MEMORIA
-  bool esOscuroGuardado = prefs.getBool('modoOscuro') ?? false;
-  themeNotifier.value = esOscuroGuardado ? ThemeMode.dark : ThemeMode.light;
+  // LEER MODO OSCURO DE MEMORIA (Usando la llave 'isDark' para que coincida con la Parte 4)
+  bool esOscuroGuardado = prefs.getBool('isDark') ?? false;
+  
+  globalThemeNotifier.value = esOscuroGuardado ? ThemeMode.dark : ThemeMode.light;
 
   Widget pantallaInicial = const LoginScreen();
 
@@ -58,14 +64,28 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
-      valueListenable: themeNotifier,
+      valueListenable: globalThemeNotifier,
       builder: (context, currentMode, _) {
         return MaterialApp(
           title: 'Monte Rosa App',
           debugShowCheckedModeBanner: false,
           themeMode: currentMode,
+          
+          // ==========================================
+          // CONFIGURACIÓN DEL IDIOMA (ESPAÑOL)
+          // ==========================================
+          localizationsDelegates: const [
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('es', 'ES'), 
+          ],
+
           theme: ThemeData(
-            useMaterial3: true, brightness: Brightness.light,
+            useMaterial3: true, 
+            brightness: Brightness.light,
             colorScheme: ColorScheme.fromSeed(seedColor: colorIngenioOrange, brightness: Brightness.light),
             scaffoldBackgroundColor: const Color(0xFFF5F5F5),
             appBarTheme: const AppBarTheme(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white),
@@ -73,7 +93,8 @@ class MyApp extends StatelessWidget {
             floatingActionButtonTheme: const FloatingActionButtonThemeData(backgroundColor: colorIngenioOrange, foregroundColor: Colors.white),
           ),
           darkTheme: ThemeData(
-            useMaterial3: true, brightness: Brightness.dark,
+            useMaterial3: true, 
+            brightness: Brightness.dark,
             colorScheme: ColorScheme.fromSeed(seedColor: colorIngenioOrange, brightness: Brightness.dark, surface: const Color(0xFF1E1E1E)),
             scaffoldBackgroundColor: const Color(0xFF121212), 
             appBarTheme: AppBarTheme(backgroundColor: Colors.grey[900], foregroundColor: colorIngenioOrange),
@@ -255,7 +276,7 @@ class _LoginScreenState extends State<LoginScreen> with SingleTickerProviderStat
   Widget build(BuildContext context) {
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      floatingActionButton: FloatingActionButton(mini: true, backgroundColor: esOscuro ? Colors.yellow : colorIngenioOrange, child: Icon(esOscuro ? Icons.light_mode : Icons.dark_mode, color: esOscuro ? Colors.black : Colors.white), onPressed: () { themeNotifier.value = esOscuro ? ThemeMode.light : ThemeMode.dark; }),
+      floatingActionButton: FloatingActionButton(mini: true, backgroundColor: esOscuro ? Colors.yellow : colorIngenioOrange, child: Icon(esOscuro ? Icons.light_mode : Icons.dark_mode, color: esOscuro ? Colors.black : Colors.white), onPressed: () { globalThemeNotifier.value = esOscuro ? ThemeMode.light : ThemeMode.dark; }),
       floatingActionButtonLocation: FloatingActionButtonLocation.endTop,
       body: SafeArea(
         child: Center( 
@@ -552,10 +573,8 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   List<dynamic> _pendientes = [];
   List<dynamic> _historial = [];
   bool cargando = true;
+  DateTime? _fechaFiltro;
 
-  // ==========================================
-  // EL SILENCIADOR: Variable estática para que solo avise una vez por sesión
-  // ==========================================
   static bool _alertaOfflineMostrada = false;
 
   @override
@@ -565,120 +584,139 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   }
 
   Future<void> fetchOrdenes() async {
-    // 1. ANTES DE PEDIR ÓRDENES NUEVAS, INTENTAMOS SUBIR LO PENDIENTE
     await OfflineService.sincronizarPendientes(); 
-
     final url = Uri.parse('$baseUrl/api/ordenes/?trabajador=${widget.codigoTrabajador}');
     
     try {
       final response = await http.get(url).timeout(const Duration(seconds: 5));
       if (response.statusCode == 200) {
-        // 🌐 ONLINE: Guardamos una copia exacta en el celular
         SharedPreferences prefs = await SharedPreferences.getInstance();
         await prefs.setString('cache_ordenes_${widget.codigoTrabajador}', response.body);
-
         _procesarYMostrarOrdenes(response.body);
       } else {
         if(mounted) _mostrarAlertaError("Error Servidor", response.body);
       }
     } catch (e) {
-      // 📡 OFFLINE: Se cayó la red o estamos en modo avión
       if (mounted) {
         setState(() => cargando = false);
-        
-        // Solo mostramos el cartelito UNA vez por sesión
         if (!_alertaOfflineMostrada) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Modo Offline. Los cambios se sincronizarán al recuperar señal."), 
-              backgroundColor: Colors.orange,
-              duration: Duration(seconds: 4),
-            )
-          );
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Modo Offline. Datos de caché."), backgroundColor: Colors.orange, duration: Duration(seconds: 4)));
           _alertaOfflineMostrada = true; 
         }
 
-        // Recuperamos la última "foto" que guardamos
         SharedPreferences prefs = await SharedPreferences.getInstance();
         String? cache = prefs.getString('cache_ordenes_${widget.codigoTrabajador}');
         if (cache != null) {
           _procesarYMostrarOrdenes(cache);
         } else {
-          // Si no hay caché y no hay internet
-          setState(() {
-            _pendientes = [];
-            _historial = [];
-          });
+          setState(() { _pendientes = []; _historial = []; });
         }
       }
     }
   }
 
   // ==========================================
-  // BOTÓN DE RECARGA MANUAL CON DETECCIÓN DE RED
+  // Busca en la orden, y si no, busca en las actividades
   // ==========================================
-  Future<void> _botonRecargarManual() async {
-    bool conectado = await OfflineService.tieneInternet();
+  String _extraerFechaFinalizacion(dynamic orden) {
+    // 1. Prioridad a la fecha de modificación/cierre de la orden general
+    if (orden['fecha_fin_real'] != null && orden['fecha_fin_real'].toString().isNotEmpty) return orden['fecha_fin_real'].toString();
+    if (orden['fecha_modificacion'] != null && orden['fecha_modificacion'].toString().isNotEmpty) return orden['fecha_modificacion'].toString();
+    if (orden['fecha_cierre'] != null && orden['fecha_cierre'].toString().isNotEmpty) return orden['fecha_cierre'].toString();
 
-    if (conectado) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Actualizando..."), backgroundColor: Colors.green, duration: Duration(seconds: 2))
-        );
+    // 2. Si no hay fecha en la orden, extraemos la fecha más reciente de sus actividades
+    List<dynamic> acts = orden['actividades'] ?? [];
+    String fechaMasReciente = "";
+    for (var act in acts) {
+      String f = act['fecha_fin_real']?.toString() ?? "";
+      if (f.isNotEmpty && f.compareTo(fechaMasReciente) > 0) {
+        fechaMasReciente = f;
       }
-      setState(() => cargando = true);
-      await fetchOrdenes();
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Sin conexión. Intenta más tarde."), backgroundColor: Colors.redAccent, duration: Duration(seconds: 2))
+    }
+    if (fechaMasReciente.isNotEmpty) return fechaMasReciente;
+
+    // 3. Fallback a la fecha de creación original
+    if (orden['fecha_creacion'] != null && orden['fecha_creacion'].toString().isNotEmpty) return orden['fecha_creacion'].toString();
+    if (orden['fecha'] != null && orden['fecha'].toString().isNotEmpty) return orden['fecha'].toString();
+    
+    return "";
+  }
+
+  Future<void> _seleccionarFechaFiltro() async {
+    bool esOscuro = Theme.of(context).brightness == Brightness.dark;
+    final DateTime? seleccion = await showDatePicker(
+      context: context,
+      initialDate: _fechaFiltro ?? DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      locale: const Locale('es', 'ES'),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: esOscuro 
+              ? const ColorScheme.dark(primary: Color(0xFFEF7D00), onPrimary: Colors.white, surface: Color(0xFF1E1E1E), onSurface: Colors.white)
+              : const ColorScheme.light(primary: Color(0xFFEF7D00), onPrimary: Colors.white, onSurface: Colors.black),
+          ),
+          child: child!,
         );
-      }
+      },
+    );
+
+    if (seleccion != null) {
+      setState(() { _fechaFiltro = seleccion; cargando = true; });
+      SharedPreferences prefs = await SharedPreferences.getInstance();
+      String? cache = prefs.getString('cache_ordenes_${widget.codigoTrabajador}');
+      if (cache != null) _procesarYMostrarOrdenes(cache); else fetchOrdenes();
     }
   }
 
-  // ==========================================
-  // MAGIA VISUAL: Ordena las listas leyendo la bóveda
-  // ==========================================
   void _procesarYMostrarOrdenes(String jsonBody) {
     List<dynamic> todas = json.decode(jsonBody);
     
     List<dynamic> soloMias = todas.where((o) {
       String assignedWorker = (o['codigo_trabajador'] ?? "").toString().trim();
-      return assignedWorker == widget.codigoTrabajador.trim();
+      bool esSuya = assignedWorker == widget.codigoTrabajador.trim();
+
+      bool pasaFiltro = true;
+      if (_fechaFiltro != null) {
+        String fechaOrdenStr = _extraerFechaFinalizacion(o);
+        if (fechaOrdenStr.length >= 10) {
+          try {
+            // Conversión matemática para evitar errores de texto (como zonas horarias con Z)
+            DateTime dtOrden = DateTime.parse(fechaOrdenStr).toLocal();
+            pasaFiltro = (dtOrden.year == _fechaFiltro!.year) && 
+                         (dtOrden.month == _fechaFiltro!.month) && 
+                         (dtOrden.day == _fechaFiltro!.day);
+          } catch(e) {
+            // Plan B si falla el parseo
+            String fStr = _fechaFiltro!.toIso8601String().split('T')[0];
+            pasaFiltro = fechaOrdenStr.startsWith(fStr);
+          }
+        } else {
+           pasaFiltro = false; // Oculta las que de plano no tienen fecha registrada
+        }
+      }
+
+      return esSuya && pasaFiltro;
     }).toList();
 
-    // Revisamos nuestra bóveda offline para ver si el operario cerró alguna orden
     var box = Hive.box(OfflineService.boxName);
     List<String> ordenesFinalizadasOffline = [];
-    
     for (var key in box.keys) {
       var peticion = box.get(key);
       String peticionUrl = peticion['url'].toString();
-      
-      // Si la bóveda tiene un POST de finalización, extraemos el ID de la orden
       if (peticionUrl.contains('/api/ordenes/') && peticionUrl.contains('/finalizar/')) {
         RegExp regExp = RegExp(r'/ordenes/(\d+)/finalizar');
         var match = regExp.firstMatch(peticionUrl);
-        if (match != null) {
-          ordenesFinalizadasOffline.add(match.group(1)!);
-        }
+        if (match != null) ordenesFinalizadasOffline.add(match.group(1)!);
       }
     }
 
     if (mounted) {
       setState(() {
-        // Filtramos las pendientes: excluimos las que el operario ya cerró offline
-        _pendientes = soloMias.where((o) => 
-          o['estado'] == 'PENDIENTE' && !ordenesFinalizadasOffline.contains(o['id'].toString())
-        ).toList();
+        _pendientes = soloMias.where((o) => o['estado'] == 'PENDIENTE' && !ordenesFinalizadasOffline.contains(o['id'].toString())).toList();
+        var movidasAlHistorial = soloMias.where((o) => o['estado'] == 'PENDIENTE' && ordenesFinalizadasOffline.contains(o['id'].toString())).toList();
 
-        // Encontramos esas órdenes cerradas offline para moverlas visualmente
-        var movidasAlHistorial = soloMias.where((o) => 
-          o['estado'] == 'PENDIENTE' && ordenesFinalizadasOffline.contains(o['id'].toString())
-        ).toList();
-
-        // Armamos el historial combinando las que ya sabíamos + las recién cerradas offline
         _historial = soloMias.where((o) => o['estado'] == 'FINALIZADA').toList();
         _historial.addAll(movidasAlHistorial);
 
@@ -694,12 +732,7 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
     setState(() => cargando = false);
     showDialog(context: context, builder: (ctx) {
       bool esOscuro = Theme.of(context).brightness == Brightness.dark;
-      return AlertDialog(
-        backgroundColor: esOscuro ? Colors.grey[900] : Colors.white,
-        title: Text(titulo, style: const TextStyle(color: Colors.red)), 
-        content: Text(mensaje, style: TextStyle(color: esOscuro ? Colors.white : Colors.black)), 
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))]
-      );
+      return AlertDialog(backgroundColor: esOscuro ? Colors.grey[900] : Colors.white, title: Text(titulo, style: const TextStyle(color: Colors.red)), content: Text(mensaje, style: TextStyle(color: esOscuro ? Colors.white : Colors.black)), actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("OK"))]);
     });
   }
 
@@ -711,44 +744,60 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          backgroundColor: esOscuro ? Colors.grey[900] : colorIngenioOrange,
-          iconTheme: IconThemeData(color: esOscuro ? colorIngenioOrange : Colors.white),
+          backgroundColor: esOscuro ? Colors.grey[900] : const Color(0xFFEF7D00),
+          iconTheme: IconThemeData(color: esOscuro ? const Color(0xFFEF7D00) : Colors.white),
           title: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text("Mis Asignaciones", style: TextStyle(fontSize: 16, color: esOscuro ? colorIngenioOrange : Colors.white)),
-              Text(
-                "${widget.nombreTrabajador} (${widget.codigoTrabajador})", 
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: esOscuro ? Colors.grey : Colors.white70)
-              ),
+              Text("Mis Asignaciones", style: TextStyle(fontSize: 16, color: esOscuro ? const Color(0xFFEF7D00) : Colors.white)),
+              Text("${widget.nombreTrabajador} (${widget.codigoTrabajador})", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400, color: esOscuro ? Colors.grey : Colors.white70)),
             ],
           ),
           actions: [
-            // NUEVO BOTÓN DE RECARGA MANUAL
+            IconButton(icon: Icon(_fechaFiltro == null ? Icons.calendar_today : Icons.event_available), tooltip: "Filtrar por Fecha", onPressed: _seleccionarFechaFiltro),
+            
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: "Actualizar Órdenes",
-              onPressed: _botonRecargarManual,
+              onPressed: () async {
+                bool conectado = await OfflineService.tieneInternet();
+                if (conectado) {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Actualizando..."), backgroundColor: Colors.green, duration: Duration(seconds: 2)));
+                  setState(() => cargando = true);
+                  await fetchOrdenes();
+                } else {
+                  if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Sin conexión."), backgroundColor: Colors.redAccent, duration: Duration(seconds: 2)));
+                }
+              },
             ),
-            // BOTÓN ORIGINAL DE SALIR
-            IconButton(
-              icon: const Icon(Icons.exit_to_app),
-              tooltip: "Cerrar Sesión",
-              onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()))
-            )
+            
+            ValueListenableBuilder<ThemeMode>(
+              valueListenable: globalThemeNotifier,
+              builder: (context, theme, child) {
+                bool temaActualOscuro = theme == ThemeMode.dark;
+                return IconButton(
+                  icon: Icon(temaActualOscuro ? Icons.light_mode : Icons.dark_mode),
+                  tooltip: "Cambiar Tema",
+                  onPressed: () async {
+                    SharedPreferences prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('isDark', !temaActualOscuro);
+                    globalThemeNotifier.value = temaActualOscuro ? ThemeMode.light : ThemeMode.dark;
+                  },
+                );
+              }
+            ),
+
+            IconButton(icon: const Icon(Icons.exit_to_app), tooltip: "Cerrar Sesión", onPressed: () => Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen())))
           ],
           bottom: TabBar(
-            labelColor: esOscuro ? colorIngenioOrange : Colors.white, 
+            labelColor: esOscuro ? const Color(0xFFEF7D00) : Colors.white, 
             unselectedLabelColor: esOscuro ? Colors.grey : Colors.white70, 
-            indicatorColor: esOscuro ? colorIngenioOrange : Colors.white, 
-            tabs: const [
-              Tab(icon: Icon(Icons.work_history), text: "PENDIENTES"),
-              Tab(icon: Icon(Icons.check_circle), text: "HISTORIAL"),
-            ],
+            indicatorColor: esOscuro ? const Color(0xFFEF7D00) : Colors.white, 
+            tabs: const [Tab(icon: Icon(Icons.work_history), text: "PENDIENTES"), Tab(icon: Icon(Icons.check_circle), text: "HISTORIAL")],
           ),
         ),
         body: cargando 
-          ? const Center(child: CircularProgressIndicator(color: colorIngenioOrange)) 
+          ? const Center(child: CircularProgressIndicator(color: Color(0xFFEF7D00))) 
           : TabBarView(
               children: [
                 _buildListaOrdenes(_pendientes, esHistorial: false),
@@ -762,75 +811,130 @@ class _OrdenesScreenState extends State<OrdenesScreen> {
   Widget _buildListaOrdenes(List<dynamic> lista, {required bool esHistorial}) {
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
 
-    if (lista.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(esHistorial ? Icons.history : Icons.assignment_turned_in, size: 50, color: esOscuro ? Colors.grey[700] : Colors.grey[300]),
-            const SizedBox(height: 10),
-            Text(
-              esHistorial ? "No tienes historial aún" : "¡Todo listo!\nNo tienes órdenes asignadas",
-              textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.grey),
-            ),
-          ],
-        ),
-      );
-    }
+    return Column(
+      children: [
+        if (_fechaFiltro != null)
+          Container(
+            color: esOscuro ? Colors.grey[800] : const Color(0xFFEF7D00).withOpacity(0.1),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.filter_alt, size: 16, color: esOscuro ? const Color(0xFFEF7D00) : Colors.black87),
+                    const SizedBox(width: 8),
+                    Text(
+                      "Mostrando: ${_fechaFiltro!.day.toString().padLeft(2, '0')}/${_fechaFiltro!.month.toString().padLeft(2, '0')}/${_fechaFiltro!.year}", 
+                      style: TextStyle(fontWeight: FontWeight.bold, color: esOscuro ? Colors.white : Colors.black87)
+                    ),
+                  ],
+                ),
+                InkWell(
+                  onTap: () { setState(() { _fechaFiltro = null; cargando = true; }); fetchOrdenes(); },
+                  child: Container(
+                    padding: const EdgeInsets.all(4),
+                    decoration: BoxDecoration(color: Colors.red[100], borderRadius: BorderRadius.circular(4)),
+                    child: const Icon(Icons.close, color: Colors.red, size: 18),
+                  ),
+                )
+              ]
+            )
+          ),
 
-    return RefreshIndicator(
-      color: colorIngenioOrange,
-      onRefresh: fetchOrdenes,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(10),
-        itemCount: lista.length,
-        itemBuilder: (context, index) {
-          final orden = lista[index];
-          
-          String letraAvatar = "?";
-          if (orden['prioridad'] != null && orden['prioridad'].toString().isNotEmpty) {
-             letraAvatar = orden['prioridad']; 
-          }
-          
-          Color colorAvatar = Colors.grey;
-          if (orden['prioridad'] == '1') colorAvatar = Colors.red;
-          if (orden['prioridad'] == '2') colorAvatar = Colors.orange;
-          if (orden['prioridad'] == '3') colorAvatar = Colors.amber;
-          if (orden['prioridad'] == '4') colorAvatar = Colors.green;
-          
-          Color colorFinal = esHistorial ? Colors.green : colorAvatar;
+        Expanded(
+          child: lista.isEmpty
+            ? Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(esHistorial ? Icons.history : Icons.assignment_turned_in, size: 50, color: esOscuro ? Colors.grey[700] : Colors.grey[300]),
+                    const SizedBox(height: 10),
+                    Text(
+                      _fechaFiltro != null ? "No hay órdenes finalizadas o asignadas\nen esta fecha." : (esHistorial ? "No tienes historial aún" : "¡Todo listo!\nNo tienes órdenes asignadas"),
+                      textAlign: TextAlign.center, style: const TextStyle(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              )
+            : RefreshIndicator(
+                color: const Color(0xFFEF7D00),
+                onRefresh: fetchOrdenes,
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(10),
+                  itemCount: lista.length,
+                  itemBuilder: (context, index) {
+                    final orden = lista[index];
+                    
+                    // ==========================================
+                    // TEXTO DE FECHA DINÁMICO ARRIBA DE LA TARJETA
+                    // ==========================================
+                    String fechaMostrar = "";
+                    if (_fechaFiltro != null) {
+                      String cruda = _extraerFechaFinalizacion(orden);
+                      if (cruda.length >= 10) {
+                        try {
+                          DateTime dt = DateTime.parse(cruda).toLocal();
+                          // Formato: 24/03 - 15:30
+                          fechaMostrar = "${dt.day.toString().padLeft(2,'0')}/${dt.month.toString().padLeft(2,'0')} - ${dt.hour.toString().padLeft(2,'0')}:${dt.minute.toString().padLeft(2,'0')}";
+                        } catch(e) {
+                          fechaMostrar = cruda.substring(0, 10);
+                        }
+                      }
+                    }
 
-          return Card(
-            color: esOscuro ? Colors.grey[850] : Colors.white,
-            elevation: 2, 
-            margin: const EdgeInsets.symmetric(vertical: 5),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: colorFinal,
-                child: esHistorial 
-                    ? const Icon(Icons.check, color: Colors.white) 
-                    : Text(letraAvatar, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    String letraAvatar = "?";
+                    if (orden['prioridad'] != null && orden['prioridad'].toString().isNotEmpty) letraAvatar = orden['prioridad']; 
+                    
+                    Color colorAvatar = Colors.grey;
+                    if (orden['prioridad'] == '1') colorAvatar = Colors.red;
+                    if (orden['prioridad'] == '2') colorAvatar = Colors.orange;
+                    if (orden['prioridad'] == '3') colorAvatar = Colors.amber;
+                    if (orden['prioridad'] == '4') colorAvatar = Colors.green;
+                    
+                    Color colorFinal = esHistorial ? Colors.green : colorAvatar;
+
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // TEXTO SUPERIOR SOLO VISIBLE SI HAY FILTRO
+                        if (_fechaFiltro != null && fechaMostrar.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(left: 15, top: 10, bottom: 2),
+                            child: Text(
+                              "Finalizada/Actualizada: $fechaMostrar", 
+                              style: TextStyle(color: esOscuro ? Colors.grey[400] : Colors.grey[600], fontSize: 11, fontWeight: FontWeight.bold)
+                            ),
+                          ),
+                          
+                        Card(
+                          color: esOscuro ? Colors.grey[850] : Colors.white,
+                          elevation: 2, 
+                          margin: EdgeInsets.symmetric(vertical: _fechaFiltro != null ? 2 : 5),
+                          child: ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: colorFinal,
+                              child: esHistorial ? const Icon(Icons.check, color: Colors.white) : Text(letraAvatar, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            ),
+                            title: Text("Orden #${orden['numero_orden']}", style: TextStyle(fontWeight: FontWeight.bold, color: esOscuro ? Colors.white : Colors.black)),
+                            subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text(orden['descripcion'] ?? "Sin descripción", style: TextStyle(color: esOscuro ? const Color(0xFFEF7D00) : Colors.black87, fontWeight: FontWeight.bold)),
+                                Text(orden['ubicacion'] ?? "Sin ubicación", style: TextStyle(color: esOscuro ? Colors.grey[400] : Colors.black54)),
+                            ]),
+                            trailing: Icon(Icons.arrow_forward_ios, size: 16, color: esOscuro ? const Color(0xFFEF7D00) : Colors.grey),
+                            onTap: () {
+                              Navigator.push(context, MaterialPageRoute(builder: (context) => DetalleOrdenScreen(orden: orden, nombreTrabajador: widget.nombreTrabajador)))
+                              .then((_) { setState(() => cargando = true); fetchOrdenes(); });
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
               ),
-              title: Text("Orden #${orden['numero_orden']}", style: TextStyle(fontWeight: FontWeight.bold, color: esOscuro ? Colors.white : Colors.black)),
-              subtitle: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(orden['descripcion'] ?? "Sin descripción", style: TextStyle(color: esOscuro ? colorIngenioOrange : Colors.black87, fontWeight: FontWeight.bold)),
-                  Text(orden['ubicacion'] ?? "Sin ubicación", style: TextStyle(color: esOscuro ? Colors.grey[400] : Colors.black54)),
-              ]),
-              trailing: Icon(Icons.arrow_forward_ios, size: 16, color: esOscuro ? colorIngenioOrange : Colors.grey),
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => DetalleOrdenScreen(orden: orden, nombreTrabajador: widget.nombreTrabajador))
-                ).then((_) { 
-                  setState(() => cargando = true); 
-                  fetchOrdenes(); 
-                });
-              },
-            ),
-          );
-        },
-      ),
+        ),
+      ],
     );
   }
 }
@@ -863,51 +967,53 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
         if (mounted) setState(() => ordenActual = json.decode(response.body)); 
       }
     } catch (e) { 
-      // 📡 MODO OFFLINE SILENCIOSO: Sin alertas rojas, solo lo ignoramos.
+      // MODO OFFLINE SILENCIOSO
     } finally {
-      // Siempre ejecutamos esto para actualizar la vista con datos de la bóveda
       _aplicarCambiosOfflineLocales();
     }
   }
 
+  // ==========================================
+  // LECTURA DE BÓVEDA MEJORADA (Encuentra las fotos siempre)
+  // ==========================================
   void _aplicarCambiosOfflineLocales() {
     var box = Hive.box(OfflineService.boxName);
     List<dynamic> acts = List.from(ordenActual['actividades'] ?? []);
     
     for (var key in box.keys) {
       var peticion = box.get(key);
-      bool esFoto = peticion['es_foto'] == true;
-
-      if (esFoto) {
-        // MAGIA FOTOGRÁFICA: Inyectar las fotos locales de la bóveda a la vista
-        Map<String, String> fields = Map<String, String>.from(peticion['fields'] ?? {});
-        if (fields['orden'] == ordenActual['id'].toString()) {
-          int actIdOffline = int.parse(fields['actividad']!);
-          for (var i = 0; i < acts.length; i++) {
-            if (acts[i]['id'] == actIdOffline) {
-              acts[i]['evidencias'] ??= [];
-              // Evitamos duplicados visuales
-              bool yaExiste = acts[i]['evidencias'].any((e) => e['foto'] == peticion['path']);
-              if (!yaExiste) {
-                acts[i]['evidencias'].add({
-                  'foto': peticion['path'],
-                  'tipo': fields['tipo'],
-                  'es_local': true
-                });
-              }
+      
+      // 1. EXTRAER FOTOS
+      if (peticion['es_foto'] == true) {
+        Map<String, dynamic> fields = Map<String, dynamic>.from(peticion['fields'] ?? {});
+        String idActividadBoveda = fields['actividad']?.toString() ?? "";
+        
+        // Buscamos si esa actividad pertenece a esta orden
+        for (var i = 0; i < acts.length; i++) {
+          if (acts[i]['id'].toString() == idActividadBoveda) {
+            acts[i]['evidencias'] ??= [];
+            // Evitamos duplicados visuales
+            bool yaExiste = acts[i]['evidencias'].any((e) => e['foto'] == peticion['path']);
+            if (!yaExiste) {
+              acts[i]['evidencias'].add({
+                'foto': peticion['path'],
+                'tipo': fields['tipo'] ?? 'FOTO',
+                'es_local': true
+              });
             }
           }
         }
-      } else {
-        // Inyectar el estado de finalización de actividades
+      } 
+      // 2. EXTRAER ESTADOS FINALIZADOS
+      else {
         String peticionUrl = peticion['url'].toString();
         if (peticionUrl.contains('/api/actividades/') && peticionUrl.contains('/finalizar/')) {
           RegExp regExp = RegExp(r'/actividades/(\d+)/finalizar');
           var match = regExp.firstMatch(peticionUrl);
           if (match != null) {
-            int actIdOffline = int.parse(match.group(1)!);
+            String actIdOffline = match.group(1)!;
             for (var i = 0; i < acts.length; i++) {
-              if (acts[i]['id'] == actIdOffline) {
+              if (acts[i]['id'].toString() == actIdOffline) {
                 acts[i]['finished'] = true;
               }
             }
@@ -918,7 +1024,6 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     if (mounted) setState(() { ordenActual['actividades'] = acts; });
   }
 
-  // --- VISOR DE IMÁGENES A PANTALLA COMPLETA ---
   void _mostrarImagenCompleta(BuildContext context, String url, bool esLocal) {
     Widget imagenCompleta = esLocal
         ? Image.file(File(url), fit: BoxFit.contain)
@@ -1009,6 +1114,7 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
     bool esOscuro = Theme.of(context).brightness == Brightness.dark;
     List<dynamic> todas = ordenActual['actividades'] ?? [];
     
+    // Recolectamos TODAS las fotos para la vista previa
     List<dynamic> evidenciasGlobales = [];
     for (var act in todas) {
       if (act['evidencias'] != null) evidenciasGlobales.addAll(act['evidencias']);
@@ -1063,25 +1169,48 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
                       scrollDirection: Axis.horizontal,
                       itemCount: evidenciasGlobales.length,
                       itemBuilder: (context, index) {
-                        String urlFoto = evidenciasGlobales[index]['foto'] ?? "";
-                        String tipoFoto = evidenciasGlobales[index]['tipo'] ?? "FOTO";
+                        String urlFoto = evidenciasGlobales[index]['foto']?.toString() ?? "";
+                        String tipoFoto = evidenciasGlobales[index]['tipo']?.toString() ?? "FOTO";
                         bool esLocal = evidenciasGlobales[index]['es_local'] == true;
 
+                        // ==========================================
+                        // RENDERIZADO BLINDADO CONTRA ERRORES (URL VACÍAS)
+                        // ==========================================
                         Widget imagenWidget;
-                        if (esLocal) {
-                          imagenWidget = Image.file(File(urlFoto), width: 75, height: 75, fit: BoxFit.cover);
+                        if (urlFoto.trim().isEmpty) {
+                          // Si el backend registró la foto pero el link viene vacío, mostramos el ícono bloqueado
+                          imagenWidget = Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.image_not_supported, color: Colors.white54));
+                        } else if (esLocal) {
+                          imagenWidget = Image.file(
+                            File(urlFoto), width: 75, height: 75, fit: BoxFit.cover,
+                            errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white54))
+                          );
                         } else {
-                          if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
-                          imagenWidget = Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)));
+                          String finalUrl = urlFoto.startsWith('/') ? '$baseUrl$urlFoto' : urlFoto;
+                          imagenWidget = Image.network(
+                            finalUrl, width: 75, height: 75, fit: BoxFit.cover, 
+                            errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.cloud_off, color: Colors.white54))
+                          );
                         }
                         
                         return Padding(
                           padding: const EdgeInsets.only(right: 10),
                           child: GestureDetector(
-                            onTap: () => _mostrarImagenCompleta(context, urlFoto, esLocal),
+                            onTap: () {
+                              if (urlFoto.isNotEmpty) _mostrarImagenCompleta(context, urlFoto, esLocal);
+                            },
                             child: Column(
                               children: [
-                                ClipRRect(borderRadius: BorderRadius.circular(8), child: imagenWidget),
+                                // Contenedor base para que SIEMPRE haya un cuadro visible
+                                Container(
+                                  width: 75, height: 75,
+                                  decoration: BoxDecoration(
+                                    color: Colors.grey[850],
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: Colors.grey[700]!, width: 1)
+                                  ),
+                                  child: ClipRRect(borderRadius: BorderRadius.circular(8), child: imagenWidget),
+                                ),
                                 const SizedBox(height: 4),
                                 Text(tipoFoto, style: TextStyle(fontSize: 10, color: esOscuro ? Colors.grey[400] : Colors.black54, fontWeight: FontWeight.bold))
                               ],
@@ -1173,11 +1302,11 @@ class _DetalleOrdenScreenState extends State<DetalleOrdenScreen> {
 
 class EjecucionActividadScreen extends StatefulWidget {
   final Map<String, dynamic> actividad;
-  final String nombreTrabajador; 
+  final String nombreTrabajador;
   final bool esAdmin;
 
   const EjecucionActividadScreen({
-    super.key, 
+    super.key,
     required this.actividad,
     required this.nombreTrabajador,
     this.esAdmin = false,
@@ -1194,25 +1323,49 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
   bool _enProgreso = false;
   bool _finalizado = false;
   bool _enviandoFoto = false;
-  bool _procesandoCierre = false; 
-  
-  String? _horaInicioReal; 
-  
+  bool _procesandoCierre = false;
+
+  String? _horaInicioReal;
+
   List<dynamic> _historialBitacora = [];
   final _notasController = TextEditingController();
-  final _nombreManualController = TextEditingController(); 
+  final _nombreManualController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     actividadData = widget.actividad;
-    _procesarDatosIniciales();
+    // 1. LO PRIMERO QUE HACE ES BUSCAR EL RESPALDO EN CASO DE QUE LA APP SE HAYA CERRADO
+    _recuperarRespaldoOffline();
   }
 
   // ==========================================
-  // VISOR DE IMÁGENES (Soporta red y local)
+  // MAGIA OFFLINE: RESPALDO DE SUPERVIVENCIA
   // ==========================================
+  Future<void> _recuperarRespaldoOffline() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    String? respaldo = prefs.getString('respaldo_actividad_${actividadData['id']}');
+
+    if (respaldo != null) {
+      Map<String, dynamic> datosRespaldo = json.decode(respaldo);
+      if (datosRespaldo['en_progreso'] == true || datosRespaldo['finished'] == true) {
+        if (mounted) {
+          setState(() {
+            actividadData = datosRespaldo;
+          });
+        }
+      }
+    }
+    _procesarDatosIniciales();
+  }
+
+  Future<void> _guardarRespaldoActividad() async {
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setString('respaldo_actividad_${actividadData['id']}', json.encode(actividadData));
+  }
+  // ==========================================
+
   void _mostrarImagenCompleta(BuildContext context, String url, bool esLocal) {
     Widget imagenCompleta = esLocal
         ? Image.file(File(url), fit: BoxFit.contain)
@@ -1233,7 +1386,8 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
               child: imagenCompleta,
             ),
             Positioned(
-              top: 0, right: 0,
+              top: 0,
+              right: 0,
               child: IconButton(
                 icon: const Icon(Icons.cancel, color: Colors.white, size: 35),
                 onPressed: () => Navigator.pop(ctx),
@@ -1241,30 +1395,56 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
             )
           ],
         ),
-      )
+      ),
     );
   }
 
+  // ==========================================
+  // ESCUDO PROTECTOR PARA FOTOS LOCALES
+  // ==========================================
   Future<void> _recargarActividad() async {
     final url = Uri.parse('$baseUrl/api/actividades/${actividadData['id']}/');
     try {
       final response = await http.get(url);
-      if (response.statusCode == 200) { 
-         if (mounted) setState(() { actividadData = json.decode(response.body); _procesarDatosIniciales(); });
+      if (response.statusCode == 200) {
+        Map<String, dynamic> newData = json.decode(response.body);
+
+        // Rescatamos las fotos locales para que el backend no las borre de la vista
+        List<dynamic> fotosLocalesProtegidas = [];
+        if (actividadData['evidencias'] != null) {
+          for (var ev in actividadData['evidencias']) {
+            if (ev['es_local'] == true) {
+              fotosLocalesProtegidas.add(ev);
+            }
+          }
+        }
+
+        // Se las volvemos a inyectar a los datos nuevos
+        newData['evidencias'] ??= [];
+        newData['evidencias'].addAll(fotosLocalesProtegidas);
+
+        if (mounted) {
+          setState(() {
+            actividadData = newData;
+            _procesarDatosIniciales();
+          });
+        }
       }
-    } catch (e) { /* En modo offline mantenemos los datos que ya tenemos */ }
+    } catch (e) {
+      // En modo offline mantenemos los datos de la caja negra
+    }
   }
 
   void _procesarDatosIniciales() {
     if (actividadData['bitacora'] != null) {
       _historialBitacora = List.from(actividadData['bitacora']);
-      _historialBitacora.sort((a, b) => (a['fecha_hora']??"").compareTo(b['fecha_hora']??""));
-      
+      _historialBitacora.sort((a, b) => (a['fecha_hora'] ?? "").compareTo(b['fecha_hora'] ?? ""));
+
       if (_historialBitacora.isNotEmpty && _horaInicioReal == null) {
-         _horaInicioReal = _historialBitacora.first['fecha_hora'];
+        _horaInicioReal = _historialBitacora.first['fecha_hora'];
       }
     }
-    
+
     if (actividadData['fecha_inicio_real'] != null) {
       _horaInicioReal = actividadData['fecha_inicio_real'];
     }
@@ -1281,17 +1461,25 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) { _sincronizarEstadoInicial(); }
+    if (state == AppLifecycleState.resumed) {
+      _sincronizarEstadoInicial();
+    }
   }
 
   void _sincronizarEstadoInicial() {
-    _timer?.cancel(); 
+    _timer?.cancel();
     if (actividadData['tiempo_real_acumulado'] != null) {
       try {
         List<String> parts = actividadData['tiempo_real_acumulado'].split(':');
-        _tiempoAcumulado = Duration(hours: int.parse(parts[0]), minutes: int.parse(parts[1]), seconds: double.parse(parts[2]).toInt());
-      } catch (e) { /* */ }
+        _tiempoAcumulado = Duration(
+            hours: int.parse(parts[0]),
+            minutes: int.parse(parts[1]),
+            seconds: double.parse(parts[2]).toInt());
+      } catch (e) {
+        // Ignorar error de parseo
+      }
     }
+    
     _enProgreso = actividadData['en_progreso'] ?? false;
     _finalizado = actividadData['finished'] ?? false;
 
@@ -1301,18 +1489,31 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
         if (ultimoEvento['fecha_hora'] != null) {
           DateTime fechaUltimoEvento = DateTime.parse(ultimoEvento['fecha_hora']);
           DateTime ahora = DateTime.now();
+          
+          // Recupera el tiempo fantasma que pasó mientras la app estaba cerrada
           Duration tiempoTranscurridoOffline = ahora.difference(fechaUltimoEvento);
-          if (!tiempoTranscurridoOffline.isNegative) { _tiempoAcumulado += tiempoTranscurridoOffline; }
+          if (!tiempoTranscurridoOffline.isNegative) {
+            _tiempoAcumulado += tiempoTranscurridoOffline;
+          }
         }
-      } catch (e) { /* */ }
+      } catch (e) {
+        // Ignorar error de parseo
+      }
     }
-    if (_enProgreso && !_finalizado && !widget.esAdmin) _iniciarTimerVisual();
+    
+    if (_enProgreso && !_finalizado && !widget.esAdmin) {
+      _iniciarTimerVisual();
+    }
   }
 
   void _iniciarTimerVisual() {
     _timer?.cancel();
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) { setState(() => _tiempoAcumulado += const Duration(seconds: 1)); }
+      if (mounted) {
+        setState(() {
+          _tiempoAcumulado += const Duration(seconds: 1);
+        });
+      }
     });
   }
 
@@ -1326,6 +1527,7 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     for (var ev in eventos) {
       String tipo = ev['evento'].toString().toUpperCase();
       if (ev['fecha_hora'] == null) continue;
+      
       DateTime fecha = DateTime.parse(ev['fecha_hora']);
 
       if (tipo == 'PAUSA') {
@@ -1335,30 +1537,26 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
         inicioPausa = null;
       }
     }
-    if (inicioPausa != null) pausas += DateTime.now().difference(inicioPausa);
+    if (inicioPausa != null) {
+      pausas += DateTime.now().difference(inicioPausa);
+    }
 
     String twoDigits(int n) => n.toString().padLeft(2, "0");
     return "${twoDigits(pausas.inHours)}:${twoDigits(pausas.inMinutes.remainder(60))}:${twoDigits(pausas.inSeconds.remainder(60))}";
   }
 
-  // ==========================================
-  // MAGIA OFFLINE: GUARDADO DE FOTOS Y VISTA PREVIA
-  // ==========================================
   Future<void> _tomarYSubirFoto(String tipo, ImageSource source) async {
     final picker = ImagePicker();
-    final XFile? photo = await picker.pickImage(
-      source: source, 
-      imageQuality: 85,
-      maxWidth: 1200, 
-    );
-    
+    final XFile? photo = await picker.pickImage(source: source, imageQuality: 85, maxWidth: 1200);
     if (photo == null) return;
+    
+    // BLINDAJE CONTRA CIERRE DE APP: Copiamos la foto a la memoria permanente
+    final Directory appDocDir = await getApplicationDocumentsDirectory();
+    final String rutaPermanente = '${appDocDir.path}/evidencia_${DateTime.now().millisecondsSinceEpoch}.jpg';
+    final File archivoPermanente = await File(photo.path).copy(rutaPermanente);
 
-    final bytes = await photo.readAsBytes();
-    if (bytes.isEmpty) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("❌ Archivo vacío.")));
-      return;
-    }
+    final bytes = await archivoPermanente.readAsBytes();
+    if (bytes.isEmpty) return;
 
     setState(() => _enviandoFoto = true);
     
@@ -1367,31 +1565,24 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       'tipo': tipo,
       'descripcion': "Subido por ${widget.nombreTrabajador}"
     };
-    if (actividadData['orden'] != null) {
-      camposTexto['orden'] = actividadData['orden'].toString();
-    }
+    if (actividadData['orden'] != null) camposTexto['orden'] = actividadData['orden'].toString();
 
     bool exitoOnline = await OfflineService.subirFotoSegura(
       url: '$baseUrl/api/evidencias/',
-      imagePath: photo.path,
+      imagePath: archivoPermanente.path, // Usamos la foto guardada permanentemente
       fields: camposTexto,
     );
 
     if (mounted) {
       setState(() {
         _enviandoFoto = false;
-        // INYECTAMOS LA FOTO LOCALMENTE PARA QUE SE VEA AUNQUE NO HAYA RED
         actividadData['evidencias'] ??= [];
-        actividadData['evidencias'].add({
-          'foto': photo.path,
-          'tipo': tipo,
-          'es_local': true // <--- Bandera clave
-        });
+        actividadData['evidencias'].add({'foto': archivoPermanente.path, 'tipo': tipo, 'es_local': true});
       });
+      _guardarRespaldoActividad(); 
 
       if (exitoOnline) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("✅ Evidencia enviada"), backgroundColor: Colors.green));
-        _recargarActividad(); 
       } else {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("💾 Guardada offline. Se subirá con la red."), backgroundColor: Colors.orange));
       }
@@ -1408,13 +1599,19 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
             children: [
               ListTile(
                 leading: const Icon(Icons.camera_alt, color: Color(0xFFEF7D00)),
-                title: const Text('Tomar Foto con Cámara'),
-                onTap: () { Navigator.pop(context); _tomarYSubirFoto(tipo, ImageSource.camera); },
+                title: const Text('Tomar Foto'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _tomarYSubirFoto(tipo, ImageSource.camera);
+                },
               ),
               ListTile(
                 leading: const Icon(Icons.photo_library, color: Color(0xFFEF7D00)),
-                title: const Text('Seleccionar de Galería'),
-                onTap: () { Navigator.pop(context); _tomarYSubirFoto(tipo, ImageSource.gallery); },
+                title: const Text('Galería'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _tomarYSubirFoto(tipo, ImageSource.gallery);
+                },
               ),
             ],
           ),
@@ -1427,37 +1624,43 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     await OfflineService.peticionSegura(
       url: '$baseUrl/api/bitacora/',
       metodo: 'POST',
-      body: {'actividad': actividadData['id'], 'evento': tipoEvento}
+      body: {
+        'actividad': actividadData['id'],
+        'evento': tipoEvento
+      }
     );
 
-    setState(() { 
+    setState(() {
       _historialBitacora.add({
         'actividad': actividadData['id'],
         'evento': tipoEvento,
         'fecha_hora': DateTime.now().toIso8601String()
-      }); 
+      });
+      actividadData['bitacora'] = _historialBitacora;
     });
+    
+    await _guardarRespaldoActividad();
   }
 
-  // ==========================================
-  // MAGIA OFFLINE: LIMPIEZA Y GUARDADO DE FECHA INICIO
-  // ==========================================
   Future<void> _actualizarActividadEnDjango(bool arrancando) async {
     String tiempoStr = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
-    Map<String, dynamic> datos = {'en_progreso': arrancando, 'tiempo_real_acumulado': tiempoStr};
+    Map<String, dynamic> datos = {
+      'en_progreso': arrancando,
+      'tiempo_real_acumulado': tiempoStr
+    };
 
     if (arrancando && _horaInicioReal == null) {
       String nombreFinal = widget.nombreTrabajador;
-      if (nombreFinal == "null" || nombreFinal.trim().isEmpty) { nombreFinal = _nombreManualController.text; }
+      if (nombreFinal == "null" || nombreFinal.trim().isEmpty) {
+        nombreFinal = _nombreManualController.text;
+      }
       datos['nombre_ejecutor'] = nombreFinal;
       
-      // 1. Limpiamos la fecha de milisegundos para Django
       String ahora = DateTime.now().toIso8601String().split('.')[0];
       datos['fecha_inicio_real'] = ahora;
       _horaInicioReal = ahora;
       
-      // 2. Guardamos en la memoria local para evitar amnesia
-      actividadData['fecha_inicio_real'] = ahora; 
+      actividadData['fecha_inicio_real'] = ahora;
       actividadData['nombre_ejecutor'] = nombreFinal;
     }
 
@@ -1465,20 +1668,23 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       url: '$baseUrl/api/actividades/${actividadData['id']}/',
       metodo: 'PATCH',
       body: datos
-    ); 
+    );
 
     actividadData['en_progreso'] = arrancando;
-    actividadData['tiempo_real_acumulado'] = tiempoStr; 
+    actividadData['tiempo_real_acumulado'] = tiempoStr;
 
-    setState(() { 
-      _enProgreso = arrancando; 
-      if (arrancando) _iniciarTimerVisual(); else _timer?.cancel(); 
+    setState(() {
+      _enProgreso = arrancando;
+      if (arrancando) {
+        _iniciarTimerVisual();
+      } else {
+        _timer?.cancel();
+      }
     });
+    
+    await _guardarRespaldoActividad();
   }
 
-  // ==========================================
-  // MAGIA OFFLINE: LIMPIEZA Y GUARDADO DE FECHA FIN
-  // ==========================================
   Future<void> _finalizarTareaEnDjango() async {
     _timer?.cancel();
     setState(() => _procesandoCierre = true);
@@ -1486,10 +1692,9 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     String tiempoActivoStr = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
     String tiempoPausadoStr = _calcularTiempoPausas();
     
-    // 1. Limpiamos las fechas de milisegundos
-    String fechaFinReal = DateTime.now().toIso8601String().split('.')[0]; 
-    String fechaInicioReal = _horaInicioReal != null 
-        ? _horaInicioReal!.split('.')[0] 
+    String fechaFinReal = DateTime.now().toIso8601String().split('.')[0];
+    String fechaInicioReal = _horaInicioReal != null
+        ? _horaInicioReal!.split('.')[0]
         : DateTime.now().toIso8601String().split('.')[0];
 
     Map<String, dynamic> datos = {
@@ -1509,16 +1714,24 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
       metodo: 'POST',
       body: datos
     );
-    
-    // 2. Guardamos en la memoria local
+
     actividadData['fecha_fin_real'] = fechaFinReal;
-      
-    setState(() { _finalizado = true; _enProgreso = false; _procesandoCierre = false; });
+    actividadData['finished'] = true;
+
+    SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove('respaldo_actividad_${actividadData['id']}');
+
+    setState(() {
+      _finalizado = true;
+      _enProgreso = false;
+      _procesandoCierre = false;
+    });
+    
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Tarea Finalizada (Guardada local o en servidor)"), backgroundColor: Colors.green)
+        const SnackBar(content: Text("Tarea Finalizada"), backgroundColor: Colors.green)
       );
-      Navigator.pop(context); 
+      Navigator.pop(context);
     }
   }
 
@@ -1533,16 +1746,36 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
         builder: (ctx) => AlertDialog(
           backgroundColor: esOscuro ? Colors.grey[900] : Colors.white,
           title: Text("Falta Identificación", style: TextStyle(color: esOscuro ? const Color(0xFFEF7D00) : Colors.black)),
-          content: Column(mainAxisSize: MainAxisSize.min, children: [
-             Text("Ingresa tu nombre para iniciar:", style: TextStyle(color: esOscuro ? Colors.white : Colors.black)),
-             const SizedBox(height: 10),
-             TextField(controller: _nombreManualController, decoration: const InputDecoration(labelText: "Tu Nombre"), style: TextStyle(color: esOscuro ? Colors.white : Colors.black))
-          ]),
-          actions: [ElevatedButton(onPressed: () { Navigator.pop(ctx); if (_nombreManualController.text.isNotEmpty) _botonIniciar(); }, style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF7D00), foregroundColor: Colors.white), child: const Text("INICIAR"))]
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text("Ingresa tu nombre:", style: TextStyle(color: esOscuro ? Colors.white : Colors.black)),
+              const SizedBox(height: 10),
+              TextField(
+                controller: _nombreManualController,
+                decoration: const InputDecoration(labelText: "Tu Nombre"),
+                style: TextStyle(color: esOscuro ? Colors.white : Colors.black)
+              )
+            ]
+          ),
+          actions: [
+            ElevatedButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                if (_nombreManualController.text.isNotEmpty) _botonIniciar();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFFEF7D00),
+                foregroundColor: Colors.white
+              ),
+              child: const Text("INICIAR")
+            )
+          ]
         )
       );
       return;
     }
+    
     await _actualizarActividadEnDjango(true);
     String evento = _historialBitacora.isEmpty ? "INICIO" : "REANUDAR";
     await _registrarEventoBitacora(evento);
@@ -1554,33 +1787,54 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
     String reloj = _tiempoAcumulado.toString().split('.').first.padLeft(8, "0");
     List<dynamic> evidencias = actividadData['evidencias'] ?? [];
     bool haIniciadoAlgunaVez = _historialBitacora.isNotEmpty;
-    
+
     return Scaffold(
       appBar: AppBar(
         title: Image.asset(
-           'assets/logo.png',
-           height: 40, 
-           errorBuilder: (c, e, s) => const Text("Detalle de Operación", style: TextStyle(color: Colors.white))
-        ),
+          'assets/logo.png',
+          height: 40,
+          errorBuilder: (c, e, s) => const Text("Detalle de Operación", style: TextStyle(color: Colors.white))
+        )
       ),
       body: Column(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(vertical: 20),
-            color: esOscuro ? Colors.grey[850] : Colors.white, 
+            color: esOscuro ? Colors.grey[850] : Colors.white,
             width: double.infinity,
-            child: Column(children: [
+            child: Column(
+              children: [
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
-                  child: Text(actividadData['descripcion'] ?? "Operación sin título", textAlign: TextAlign.center, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: esOscuro ? Colors.white : Colors.black87)),
+                  child: Text(
+                    actividadData['descripcion'] ?? "Operación",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: esOscuro ? Colors.white : Colors.black87
+                    )
+                  )
                 ),
                 const SizedBox(height: 10),
-                Text(reloj, style: TextStyle(fontSize: 50, fontWeight: FontWeight.bold, color: widget.esAdmin ? Colors.grey : const Color(0xFFEF7D00), fontFamily: 'monospace')),
+                Text(
+                  reloj,
+                  style: TextStyle(
+                    fontSize: 50,
+                    fontWeight: FontWeight.bold,
+                    color: widget.esAdmin ? Colors.grey : const Color(0xFFEF7D00),
+                    fontFamily: 'monospace'
+                  )
+                ),
                 const SizedBox(height: 5),
-                if (_finalizado) const Text("✅ FINALIZADA", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
-                else if (_enProgreso) const Text("🔥 EN EJECUCIÓN...", style: TextStyle(color: Color(0xFFEF7D00), fontWeight: FontWeight.bold))
-                else if (widget.esAdmin) const Text("OJO: MODO LECTURA ADMIN", style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold))
-            ]),
+                if (_finalizado)
+                  const Text("✅ FINALIZADA", style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold))
+                else if (_enProgreso)
+                  const Text("🔥 EN EJECUCIÓN...", style: TextStyle(color: Color(0xFFEF7D00), fontWeight: FontWeight.bold))
+                else if (widget.esAdmin)
+                  const Text("OJO: MODO LECTURA ADMIN", style: TextStyle(color: Colors.blueGrey, fontWeight: FontWeight.bold))
+              ]
+            ),
           ),
           
           Expanded(
@@ -1607,27 +1861,49 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
                               itemBuilder: (context, index) {
                                 String urlFoto = evidencias[index]['foto'] ?? "";
                                 String tipoFoto = evidencias[index]['tipo'] ?? "FOTO";
-                                
-                                // Revisamos si la foto se acaba de tomar en modo offline
                                 bool esLocal = evidencias[index]['es_local'] == true;
 
                                 Widget imagenWidget;
                                 if (esLocal) {
-                                  imagenWidget = Image.file(File(urlFoto), width: 75, height: 75, fit: BoxFit.cover);
+                                  imagenWidget = Image.file(
+                                    File(urlFoto),
+                                    width: 75,
+                                    height: 75,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white))
+                                  );
                                 } else {
-                                  if (urlFoto.startsWith('/')) urlFoto = '$baseUrl$urlFoto';
-                                  imagenWidget = Image.network(urlFoto, width: 75, height: 75, fit: BoxFit.cover, errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white)));
+                                  if (urlFoto.startsWith('/')) {
+                                    urlFoto = '$baseUrl$urlFoto';
+                                  }
+                                  imagenWidget = Image.network(
+                                    urlFoto,
+                                    width: 75,
+                                    height: 75,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (c,e,s) => Container(width: 75, height: 75, color: Colors.grey[800], child: const Icon(Icons.broken_image, color: Colors.white))
+                                  );
                                 }
 
                                 return Padding(
                                   padding: const EdgeInsets.only(right: 10),
                                   child: GestureDetector(
-                                    onTap: () => _mostrarImagenCompleta(context, urlFoto, esLocal), 
+                                    onTap: () => _mostrarImagenCompleta(context, urlFoto, esLocal),
                                     child: Column(
                                       children: [
-                                        ClipRRect(borderRadius: BorderRadius.circular(8), child: imagenWidget),
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(8),
+                                          child: imagenWidget
+                                        ),
                                         const SizedBox(height: 4),
-                                        Text(tipoFoto, style: TextStyle(fontSize: 10, color: esOscuro ? Colors.grey[400] : Colors.black54, fontWeight: FontWeight.bold))
+                                        Text(
+                                          tipoFoto,
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: esOscuro ? Colors.grey[400] : Colors.black54,
+                                            fontWeight: FontWeight.bold
+                                          )
+                                        )
                                       ],
                                     ),
                                   ),
@@ -1636,13 +1912,23 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
                             ),
                           )
                         else
-                           Padding(padding: const EdgeInsets.all(8.0), child: Text("Sin fotos en esta operación.", style: TextStyle(color: esOscuro ? Colors.grey : Colors.grey[600], fontStyle: FontStyle.italic))),
+                          Padding(
+                            padding: const EdgeInsets.all(8.0),
+                            child: Text(
+                              "Sin fotos en esta operación.",
+                              style: TextStyle(color: esOscuro ? Colors.grey : Colors.grey[600], fontStyle: FontStyle.italic)
+                            )
+                          ),
                         
                         if (!widget.esAdmin && !_finalizado) ...[
                            const SizedBox(height: 10),
                            Row(
-                             mainAxisAlignment: MainAxisAlignment.spaceEvenly, 
-                             children: [_botonFoto("ANTES", Icons.image_search, esOscuro), _botonFoto("DURANTE", Icons.build, esOscuro), _botonFoto("DESPUES", Icons.check_circle_outline, esOscuro)]
+                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                             children: [
+                               _botonFoto("ANTES", Icons.image_search, esOscuro),
+                               _botonFoto("DURANTE", Icons.build, esOscuro),
+                               _botonFoto("DESPUES", Icons.check_circle_outline, esOscuro)
+                             ]
                            ),
                         ]
                       ],
@@ -1656,12 +1942,35 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
                       itemBuilder: (context, index) {
                          final ev = _historialBitacora[_historialBitacora.length - 1 - index];
                          String hora = "--:--";
-                         if (ev['fecha_hora'] != null) { try { hora = ev['fecha_hora'].toString().split('T')[1].substring(0, 8); } catch(e){/* */} }
+                         if (ev['fecha_hora'] != null) {
+                           try {
+                             hora = ev['fecha_hora'].toString().split('T')[1].substring(0, 8);
+                           } catch(e) {
+                             // Ignorar
+                           }
+                         }
+                         
+                         bool esPausa = ev['evento'] == 'PAUSA';
+                         
                          return ListTile(
                            dense: true,
-                           leading: Icon(ev['evento'] == 'PAUSA' ? Icons.pause_circle : Icons.play_circle, color: ev['evento'] == 'PAUSA' ? Colors.orange : Colors.green),
-                           title: Text(ev['evento'], style: TextStyle(fontWeight: FontWeight.bold, color: esOscuro ? Colors.white : Colors.black)),
-                           trailing: Text(hora, style: TextStyle(color: esOscuro ? Colors.grey : Colors.black54)),
+                           leading: Icon(
+                             esPausa ? Icons.pause_circle : Icons.play_circle,
+                             color: esPausa ? Colors.orange : Colors.green
+                           ),
+                           title: Text(
+                             ev['evento'],
+                             style: TextStyle(
+                               fontWeight: FontWeight.bold,
+                               color: esOscuro ? Colors.white : Colors.black
+                             )
+                           ),
+                           trailing: Text(
+                             hora,
+                             style: TextStyle(
+                               color: esOscuro ? Colors.grey : Colors.black54
+                             )
+                           )
                          );
                       },
                     ),
@@ -1671,81 +1980,122 @@ class _EjecucionActividadScreenState extends State<EjecucionActividadScreen> wit
             ),
           ),
 
-          if (!_finalizado && !widget.esAdmin) Padding(
-            padding: const EdgeInsets.all(16), 
-            child: _procesandoCierre 
-            ? const Center(child: CircularProgressIndicator(color: Color(0xFFEF7D00)))
-            : Column(children: [
-              
-              if (!_enProgreso) 
-                ElevatedButton.icon(
-                  onPressed: _botonIniciar, 
-                  icon: const Icon(Icons.play_arrow), 
-                  label: Text(haIniciadoAlgunaVez ? "REANUDAR TAREA" : "INICIAR TAREA"), 
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50))
-                )
-              else 
-                ElevatedButton.icon(
-                  onPressed: () { _actualizarActividadEnDjango(false); _registrarEventoBitacora("PAUSA"); }, 
-                  icon: const Icon(Icons.pause), 
-                  label: const Text("PAUSAR TAREA"), 
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white, minimumSize: const Size(double.infinity, 50))
-                ),
-
-              if (haIniciadoAlgunaVez) ...[
-                const SizedBox(height: 10),
-                OutlinedButton.icon(
-                  onPressed: () => showDialog(
-                    context: context, 
-                    builder: (ctx) {
-                      bool oscuroDialog = Theme.of(context).brightness == Brightness.dark;
-                      return AlertDialog(
-                        backgroundColor: oscuroDialog ? Colors.grey[900] : Colors.white, 
-                        title: Text("Finalizar Tarea", style: TextStyle(color: oscuroDialog ? const Color(0xFFEF7D00) : Colors.black)),
-                        content: TextField(controller: _notasController, decoration: const InputDecoration(labelText: "Notas Finales (Opcional)"), style: TextStyle(color: oscuroDialog ? Colors.white : Colors.black)),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text("CANCELAR", style: TextStyle(color: Colors.grey))), 
-                          ElevatedButton(
-                            onPressed: () async { 
-                               Navigator.pop(ctx); 
-                               await _registrarEventoBitacora("FINAL"); 
-                               await _finalizarTareaEnDjango(); 
-                            }, 
-                            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white), 
-                            child: const Text("FINALIZAR")
+          if (!_finalizado && !widget.esAdmin)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: _procesandoCierre
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFFEF7D00)))
+                : Column(
+                    children: [
+                      if (!_enProgreso)
+                        ElevatedButton.icon(
+                          onPressed: _botonIniciar,
+                          icon: const Icon(Icons.play_arrow),
+                          label: Text(haIniciadoAlgunaVez ? "REANUDAR TAREA" : "INICIAR TAREA"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.green,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 50)
                           )
-                        ]
-                      );
-                    }
-                  ),
-                  icon: const Icon(Icons.stop, color: Colors.red), 
-                  label: const Text("FINALIZAR TAREA", style: TextStyle(color: Colors.red)), 
-                  style: OutlinedButton.styleFrom(minimumSize: const Size(double.infinity, 50), side: const BorderSide(color: Colors.red))
-                )
-              ]
-            ])
-          )
+                        )
+                      else
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            _actualizarActividadEnDjango(false);
+                            _registrarEventoBitacora("PAUSA");
+                          },
+                          icon: const Icon(Icons.pause),
+                          label: const Text("PAUSAR TAREA"),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.orange,
+                            foregroundColor: Colors.white,
+                            minimumSize: const Size(double.infinity, 50)
+                          )
+                        ),
+
+                      if (haIniciadoAlgunaVez) ...[
+                        const SizedBox(height: 10),
+                        OutlinedButton.icon(
+                          onPressed: () => showDialog(
+                            context: context,
+                            builder: (ctx) {
+                              bool oscuroDialog = Theme.of(context).brightness == Brightness.dark;
+                              return AlertDialog(
+                                backgroundColor: oscuroDialog ? Colors.grey[900] : Colors.white,
+                                title: Text(
+                                  "Finalizar Tarea",
+                                  style: TextStyle(color: oscuroDialog ? const Color(0xFFEF7D00) : Colors.black)
+                                ),
+                                content: TextField(
+                                  controller: _notasController,
+                                  decoration: const InputDecoration(labelText: "Notas Finales (Opcional)"),
+                                  style: TextStyle(color: oscuroDialog ? Colors.white : Colors.black)
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(ctx),
+                                    child: const Text("CANCELAR", style: TextStyle(color: Colors.grey))
+                                  ),
+                                  ElevatedButton(
+                                    onPressed: () async {
+                                      Navigator.pop(ctx);
+                                      await _registrarEventoBitacora("FINAL");
+                                      await _finalizarTareaEnDjango();
+                                    },
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.red,
+                                      foregroundColor: Colors.white
+                                    ),
+                                    child: const Text("FINALIZAR")
+                                  )
+                                ]
+                              );
+                            }
+                          ),
+                          icon: const Icon(Icons.stop, color: Colors.red),
+                          label: const Text("FINALIZAR TAREA", style: TextStyle(color: Colors.red)),
+                          style: OutlinedButton.styleFrom(
+                            minimumSize: const Size(double.infinity, 50),
+                            side: const BorderSide(color: Colors.red)
+                          )
+                        )
+                      ]
+                    ]
+                  )
+            )
         ],
       ),
     );
   }
 
   Widget _botonFoto(String tipo, IconData icono, bool esOscuro) {
-    return Column(children: [
-       IconButton(
-         icon: _enviandoFoto 
-           ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFEF7D00))) 
-           : Icon(icono, size: 25), 
-         color: esOscuro ? Colors.white70 : Colors.black87, 
-         onPressed: _enviandoFoto ? null : () => _mostrarOpcionesImagen(tipo), 
-         style: IconButton.styleFrom(
-           backgroundColor: esOscuro ? Colors.grey[800] : Colors.grey[300], 
-           padding: const EdgeInsets.all(10)
-         )
-       ), 
-       const SizedBox(height: 5), 
-       Text(tipo, style: TextStyle(fontSize: 10, color: esOscuro ? Colors.grey : Colors.black54))
-    ]);
+    return Column(
+      children: [
+        IconButton(
+          icon: _enviandoFoto
+              ? const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFEF7D00))
+                )
+              : Icon(icono, size: 25),
+          color: esOscuro ? Colors.white70 : Colors.black87,
+          onPressed: _enviandoFoto ? null : () => _mostrarOpcionesImagen(tipo),
+          style: IconButton.styleFrom(
+            backgroundColor: esOscuro ? Colors.grey[800] : Colors.grey[300],
+            padding: const EdgeInsets.all(10)
+          )
+        ),
+        const SizedBox(height: 5),
+        Text(
+          tipo,
+          style: TextStyle(
+            fontSize: 10,
+            color: esOscuro ? Colors.grey : Colors.black54
+          )
+        )
+      ]
+    );
   }
 }
 // ============================

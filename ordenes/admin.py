@@ -1,6 +1,6 @@
 from django.contrib import admin
 from import_export import resources, fields
-from import_export.admin import ImportMixin # <-- CAMBIO 1: Solo importamos el Mixin de Importar
+from import_export.admin import ImportMixin
 from import_export.widgets import ForeignKeyWidget
 from datetime import datetime, date
 from django.utils.html import format_html
@@ -13,7 +13,26 @@ from django.http import HttpResponse
 from .models import OrdenTrabajo, Actividad, OrdenBorrador, OrdenPendiente, OrdenHistorial, BitacoraActividad, Evidencia
 from django.contrib.auth.models import User, Group 
 from django.contrib.auth.admin import UserAdmin
+from django.contrib.auth.forms import UserChangeForm, UserCreationForm
 from django.contrib.admin import helpers
+
+# ==========================================
+# CEREBRO DE PERMISOS (LOS 3 ROLES)
+# Esto reemplaza a los "Grupos" y les da poder automático
+# ==========================================
+class PlanificadorPermisosMixin:
+    # Si eres Planificador o Admin, tienes control total sobre las órdenes
+    def has_module_permission(self, request): return request.user.is_staff
+    def has_view_permission(self, request, obj=None): return request.user.is_staff
+    def has_change_permission(self, request, obj=None): return request.user.is_staff
+    def has_add_permission(self, request): return request.user.is_staff
+    def has_delete_permission(self, request, obj=None): return request.user.is_staff
+
+class PlanificadorInlinePermisosMixin:
+    def has_view_permission(self, request, obj=None): return request.user.is_staff
+    def has_change_permission(self, request, obj=None): return request.user.is_staff
+    def has_add_permission(self, request, obj=None): return request.user.is_staff
+    def has_delete_permission(self, request, obj=None): return request.user.is_staff
 
 # -------------------------
 # 1. LÓGICA DE IMPORTACIÓN
@@ -89,7 +108,7 @@ class ActividadResource(resources.ModelResource):
 # -----------------------
 # PANTALLA 1: BORRADORES 
 # -----------------------
-class ActividadInline(admin.TabularInline):
+class ActividadInline(PlanificadorInlinePermisosMixin, admin.TabularInline):
     model = Actividad
     fk_name = 'orden'
     extra = 0
@@ -99,7 +118,7 @@ class ActividadInline(admin.TabularInline):
     verbose_name = "Operación Detectada"
     verbose_name_plural = "Operaciones (Actividades)"
 
-class EvidenciaInline(admin.StackedInline): 
+class EvidenciaInline(PlanificadorInlinePermisosMixin, admin.StackedInline): 
     model = Evidencia
     fk_name = 'orden'
     extra = 1
@@ -123,9 +142,8 @@ class EvidenciaInline(admin.StackedInline):
 
     ver_foto.short_description = "Vista Previa de la Imagen"
 
-# <-- CAMBIO 2: Usamos ImportMixin y admin.ModelAdmin para ocultar el botón Exportar
 @admin.register(OrdenBorrador)
-class OrdenBorradorAdmin(ImportMixin, admin.ModelAdmin):
+class OrdenBorradorAdmin(ImportMixin, PlanificadorPermisosMixin, admin.ModelAdmin):
     resource_class = ActividadResource
     
     list_display = (
@@ -232,7 +250,7 @@ class OrdenBorradorAdmin(ImportMixin, admin.ModelAdmin):
 # PANTALLA 2: PENDIENTES
 # -----------------------
 @admin.register(OrdenPendiente)
-class OrdenPendienteAdmin(admin.ModelAdmin):
+class OrdenPendienteAdmin(PlanificadorPermisosMixin, admin.ModelAdmin):
     list_display = ('numero_orden', 'descripcion', 'codigo_trabajador', 'prioridad', 'ver_equipo_simple')
     search_fields = ('numero_orden', 'codigo_trabajador')
     inlines = [ActividadInline, EvidenciaInline]
@@ -253,7 +271,7 @@ class OrdenPendienteAdmin(admin.ModelAdmin):
 # PANTALLA 3: HISTORIAL
 # ----------------------
 
-class ActividadHistorialInline(admin.StackedInline):
+class ActividadHistorialInline(PlanificadorInlinePermisosMixin, admin.StackedInline):
     model = Actividad
     fk_name = 'orden'
     extra = 0
@@ -266,42 +284,35 @@ class ActividadHistorialInline(admin.StackedInline):
     fields = ('codigo_operacion', 'descripcion', 'nombre_ejecutor', 'fecha_inicio_real', 'fecha_fin_real', 'tiempo_legible', 'tiempo_pausas_legible')
     
     def tiempo_legible(self, obj):
-        if not obj.tiempo_real_acumulado:
-            return "00:00:00"
+        if not obj.tiempo_real_acumulado: return "00:00:00"
         try:
             if hasattr(obj.tiempo_real_acumulado, 'total_seconds'):
                 ts = int(obj.tiempo_real_acumulado.total_seconds())
             else:
                 ts = int(obj.tiempo_real_acumulado) // 1000000
-                
             horas, rem = divmod(ts, 3600)
             minutos, segundos = divmod(rem, 60)
             return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
-        except Exception:
-            return str(obj.tiempo_real_acumulado)
+        except Exception: return str(obj.tiempo_real_acumulado)
     tiempo_legible.short_description = "Tiempo Activo Real"
 
     def tiempo_pausas_legible(self, obj):
-        if not obj.tiempo_pausas:
-            return "00:00:00"
+        if not obj.tiempo_pausas: return "00:00:00"
         try:
             if hasattr(obj.tiempo_pausas, 'total_seconds'):
                 ts = int(obj.tiempo_pausas.total_seconds())
             else:
                 ts = int(obj.tiempo_pausas) // 1000000
-                
             horas, rem = divmod(ts, 3600)
             minutos, segundos = divmod(rem, 60)
             return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
-        except Exception:
-            return str(obj.tiempo_pausas)
+        except Exception: return str(obj.tiempo_pausas)
     tiempo_pausas_legible.short_description = "Tiempo Total en Pausa"
 
-    def has_add_permission(self, request, obj): 
-        return False
+    def has_add_permission(self, request, obj): return False
 
 @admin.register(OrdenHistorial)
-class OrdenHistorialAdmin(admin.ModelAdmin):
+class OrdenHistorialAdmin(PlanificadorPermisosMixin, admin.ModelAdmin):
     list_display = ('numero_orden', 'descripcion', 'codigo_trabajador', 'equipo', 'estado')
     search_fields = ('numero_orden', 'codigo_trabajador', 'equipo')
     list_filter = ('fin_programado',) 
@@ -322,25 +333,19 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
         wb = openpyxl.Workbook()
         ws = wb.active
         ws.title = "Cierre de Órdenes"
-
         ws.sheet_view.showGridLines = False
 
         header_fill = PatternFill(start_color="4F4F4F", end_color="4F4F4F", fill_type="solid")
         header_font = Font(bold=True, color="FFFFFF")
         center_alignment = Alignment(horizontal="center", vertical="center")
-        
-        borde_delgado = Border(
-            left=Side(style='thin', color='000000'), 
-            right=Side(style='thin', color='000000'), 
-            top=Side(style='thin', color='000000'), 
-            bottom=Side(style='thin', color='000000')
-        )
+        borde_delgado = Border(left=Side(style='thin', color='000000'), right=Side(style='thin', color='000000'), top=Side(style='thin', color='000000'), bottom=Side(style='thin', color='000000'))
 
         headers = [
             'Orden', 'Operación', 'Txt.brv.oper.', 'Equipo', 
             'Ubicación Téc.', 'Inicio Prog.', 'Fin Prog.',
             'Ejecutor Real', 'Inicio Real', 'Fin Real', 
-            'Tiempo Activo (HH:MM:SS)', 'Tiempo en Pausa (HH:MM:SS)'
+            'Tiempo Activo (HH:MM:SS)', 'Total Horas (Decimal)',
+            'Tiempo en Pausa (HH:MM:SS)', 'Pausas Horas (Decimal)'
         ]
         ws.append(headers)
 
@@ -357,19 +362,30 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
                     ts = int(valor.total_seconds())
                 elif str(valor).isdigit():
                     ts = int(valor) // 1000000
-                else:
-                    return str(valor)
+                else: return str(valor)
                 horas, rem = divmod(ts, 3600)
                 minutos, segundos = divmod(rem, 60)
                 return f"{horas:02d}:{minutos:02d}:{segundos:02d}"
-            except Exception:
-                return str(valor)
+            except Exception: return str(valor)
+
+        def calcular_decimal(valor_texto):
+            if not valor_texto or valor_texto == "00:00:00" or valor_texto == "-": return 0.0
+            try:
+                partes = str(valor_texto).split(':')
+                if len(partes) == 3:
+                    h, m, s = map(float, partes)
+                    return round(h + (m / 60.0) + (s / 3600.0), 2)
+                return 0.0
+            except: return 0.0
 
         for orden in queryset:
             actividades = Actividad.objects.filter(orden=orden)
             for act in actividades:
-                t_activo = formatear_tiempo(act.tiempo_real_acumulado)
-                t_pausa = formatear_tiempo(act.tiempo_pausas)
+                t_activo_txt = formatear_tiempo(act.tiempo_real_acumulado)
+                t_pausa_txt = formatear_tiempo(act.tiempo_pausas)
+                
+                t_activo_dec = calcular_decimal(t_activo_txt)
+                t_pausa_dec = calcular_decimal(t_pausa_txt)
 
                 inicio_real = act.fecha_inicio_real.strftime('%d/%m/%Y %H:%M') if act.fecha_inicio_real else '-'
                 fin_real = act.fecha_fin_real.strftime('%d/%m/%Y %H:%M') if act.fecha_fin_real else '-'
@@ -380,37 +396,28 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
                     orden.numero_orden, act.codigo_operacion, act.descripcion,
                     orden.equipo, orden.ubicacion, inicio_prog, fin_prog,
                     act.nombre_ejecutor or '-', inicio_real, fin_real,
-                    t_activo, t_pausa
+                    t_activo_txt, t_activo_dec,
+                    t_pausa_txt, t_pausa_dec
                 ]
                 ws.append(fila)
 
         for col in ws.columns:
             max_length = 0
             column = col[0].column_letter
-            
             for cell in col:
                 cell.border = borde_delgado
-                
-                if cell.column >= 6:
-                    cell.alignment = center_alignment
-                
+                if cell.column >= 6: cell.alignment = center_alignment
                 try:
-                    if len(str(cell.value)) > max_length:
-                        max_length = len(str(cell.value))
-                except:
-                    pass
-                    
-            ajuste = (max_length + 2)
-            ws.column_dimensions[column].width = ajuste
+                    if len(str(cell.value)) > max_length: max_length = len(str(cell.value))
+                except: pass
+            ws.column_dimensions[column].width = (max_length + 2)
 
         wb.save(response)
         return response
 
     actions = ['exportar_sap', 'eliminar_ordenes_seleccionadas']
 
-    def get_readonly_fields(self, request, obj=None):
-        return [f.name for f in self.model._meta.fields]
-
+    def get_readonly_fields(self, request, obj=None): return [f.name for f in self.model._meta.fields]
     def has_add_permission(self, request): return False 
     def has_delete_permission(self, request, obj=None): return False 
 
@@ -423,12 +430,65 @@ class OrdenHistorialAdmin(admin.ModelAdmin):
         'prioridad', 'codigo_trabajador', 'supervisor', 'estado'
     )
 
-# Limpieza
+# -------------------------
+# LIMPIEZA TOTAL DE UI FEA
+# -------------------------
 try:
     admin.site.unregister(User)
-    admin.site.unregister(Group)
+    admin.site.unregister(Group) # ¡Adiós a la pestaña de Grupos!
+    from rest_framework.authtoken.models import TokenProxy
+    admin.site.unregister(TokenProxy) # ¡Adiós a los Tokens!
 except: pass
+
+# Formularios limpios y con nombres entendibles
+class CustomUserChangeForm(UserChangeForm):
+    class Meta(UserChangeForm.Meta):
+        model = User
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'is_staff' in self.fields:
+            self.fields['is_staff'].label = "Planificador (Acceso Web)"
+            self.fields['is_staff'].help_text = "Permite iniciar sesión en la web y gestionar órdenes."
+        if 'is_superuser' in self.fields:
+            self.fields['is_superuser'].label = "Administrador Total"
+            self.fields['is_superuser'].help_text = "Control total del sistema (Órdenes + Crear Usuarios)."
+
+class CustomUserCreationForm(UserCreationForm):
+    class Meta(UserCreationForm.Meta):
+        model = User
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if 'is_staff' in self.fields:
+            self.fields['is_staff'].label = "Planificador (Acceso Web)"
+        if 'is_superuser' in self.fields:
+            self.fields['is_superuser'].label = "Administrador Total"
 
 @admin.register(User)
 class CustomUserAdmin(UserAdmin):
-    list_display = ('username', 'first_name', 'last_name', 'is_staff')
+    form = CustomUserChangeForm
+    add_form = CustomUserCreationForm
+    list_display = ('username', 'first_name', 'last_name', 'is_staff', 'is_superuser')
+    
+    # ¡ESTO ESCONDE LAS CAJAS DE PERMISOS FEAS!
+    fieldsets = (
+        (None, {'fields': ('username', 'password')}),
+        ('Información Personal', {'fields': ('first_name', 'last_name', 'email')}),
+        ('Roles de Acceso', {'fields': ('is_active', 'is_staff', 'is_superuser')}),
+    )
+
+    # Solo los administradores supremos pueden ver o crear otros usuarios
+    def has_module_permission(self, request): return request.user.is_superuser
+    def has_view_permission(self, request, obj=None): return request.user.is_superuser
+    def has_change_permission(self, request, obj=None): return request.user.is_superuser
+    def has_add_permission(self, request): return request.user.is_superuser
+    def has_delete_permission(self, request, obj=None): return request.user.is_superuser
+
+# ==========================================
+# MAGIA: MOSTRAR NOMBRE Y APELLIDO EN VEZ DEL CÓDIGO
+# ==========================================
+def get_name_or_username(self):
+    if self.first_name or self.last_name:
+        return f"{self.first_name} {self.last_name}".strip()
+    return self.username
+
+User.__str__ = get_name_or_username
